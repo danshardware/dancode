@@ -106,3 +106,19 @@ def test_load_or_create_project_loads(tmp_path, monkeypatch):
     assert slug == slug2
     assert len(config2.tasks) == 1
     assert config2.tasks[0].task_id == "zz"
+
+
+def test_feature_task_phase_token_counts_default():
+    """phase_token_counts defaults to empty dict."""
+    task = FeatureTask(task_id="t1", feature_name="feat", feature_description="desc")
+    assert task.phase_token_counts == {}
+
+
+def test_feature_task_phase_token_counts_roundtrip():
+    """phase_token_counts survives JSON round-trip via model_dump_json."""
+    import json
+    task = FeatureTask(task_id="t1", feature_name="feat", feature_description="desc")
+    task.phase_token_counts["phase1_plan"] = 999
+    raw = task.model_dump_json()
+    loaded = FeatureTask.model_validate_json(raw)
+    assert loaded.phase_token_counts["phase1_plan"] == 999
