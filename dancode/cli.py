@@ -13,6 +13,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from dotenv import load_dotenv
 load_dotenv()
 
+# Set COUNCIL_DATA_DIR BEFORE importing engine.paths — it reads the env var at module level.
+from dancode.config import CONFIG_DIR as _CONFIG_DIR
+os.environ.setdefault("COUNCIL_DATA_DIR", str(_CONFIG_DIR))
+
 from engine import paths
 
 
@@ -106,9 +110,8 @@ def main() -> None:
 
     # Point the council DATA_DIR to our dancode config dir for this project
     # so logs/workspace go to ~/.config/dancode/logs/ and workspace/.
-    from dancode.config import LOGS_DIR, CONFIG_DIR
+    from dancode.config import LOGS_DIR
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    os.environ.setdefault("COUNCIL_DATA_DIR", str(CONFIG_DIR))
     paths.init_data_dirs()
 
     from dancode.app import DancodeApp

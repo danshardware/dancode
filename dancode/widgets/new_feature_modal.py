@@ -71,7 +71,7 @@ class NewFeatureModal(ModalScreen):
             yield Label("Feature name (slug, no spaces):")
             yield Input(placeholder="e.g. user-auth-oauth", id="name-input")
             yield Label("Description (what this feature should do):")
-            yield TextArea(id="desc-input", language="markdown")
+            yield TextArea(id="desc-input")
             yield Label("OpenHands coding model:")
             yield Select(
                 options=[(label, value) for label, value in _MODEL_OPTIONS],

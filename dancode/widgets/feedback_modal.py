@@ -57,9 +57,6 @@ class FeedbackModal(ModalScreen):
         self._feature_name = feature_name
 
     def compose(self) -> ComposeResult:
-        with self.app.compose_context():  # type: ignore[attr-defined]
-            pass
-        # Build the dialog directly
         from textual.containers import Container
         with Container(id="dialog"):
             yield Label(f"Feedback for: [bold]{self._feature_name}[/bold]")
@@ -68,7 +65,7 @@ class FeedbackModal(ModalScreen):
                 "and sent to the running agent as a HumanReply.",
                 classes="muted",
             )
-            yield TextArea(id="feedback-input", language="markdown")
+            yield TextArea(id="feedback-input")
             with Container(id="actions"):
                 yield Button("Cancel", id="btn-cancel", variant="default")
                 yield Button("Submit [Ctrl+S]", id="btn-submit", variant="primary")

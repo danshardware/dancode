@@ -38,6 +38,7 @@ class DancodeApp(App):
 
     TITLE = "dancode"
     SUB_TITLE = "multi-agent coding workflow"
+    ENABLE_COMMAND_PALETTE = False
 
     CSS = """
     Screen {
@@ -73,8 +74,8 @@ class DancodeApp(App):
         self._slug = slug
         self._repo_path = repo_path
         self._selected_task_id: str | None = None
-        self._workers: dict[str, AgentWorker] = {}
-        self._asyncio_tasks: dict[str, asyncio.Task] = {}  # type: ignore[type-arg]
+        self._agent_workers: dict[str, AgentWorker] = {}
+        self._agent_tasks: dict[str, asyncio.Task] = {}  # type: ignore[type-arg]
 
     # ------------------------------------------------------------------ Layout
 
@@ -127,7 +128,7 @@ class DancodeApp(App):
     # ------------------------------------------------------------------ Worker management
 
     def _start_worker(self, task: FeatureTask) -> None:
-        if task.task_id in self._workers:
+        if task.task_id in self._agent_workers:
             return  # already running
 
         worker = AgentWorker(
@@ -136,10 +137,27 @@ class DancodeApp(App):
             slug=self._slug,
             post=self._post_from_thread,
         )
-        self._workers[task.task_id] = worker
+        self._agent_workers[task.task_id] = worker
 
         asyncio_task = asyncio.get_event_loop().create_task(worker.run())
-        self._asyncio_tasks[task.task_id] = asyncio_task
+        asyncio_task.add_done_callback(
+            lambda t: self._on_worker_done(task.task_id, t)
+        )
+        self._agent_tasks[task.task_id] = asyncio_task
+
+    def _on_worker_done(self, task_id: str, asyncio_task) -> None:
+        """Called when a worker task finishes — surfaces unhandled exceptions."""
+        exc = asyncio_task.exception() if not asyncio_task.cancelled() else None
+        if exc:
+            import traceback
+            tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+            self.call_from_thread(
+                self.notify,
+                f"{type(exc).__name__}: {exc}\n\n{tb[:500]}",
+                title=f"Worker crashed [{task_id}]",
+                severity="error",
+                timeout=30,
+            )
 
     def _post_from_thread(self, message) -> None:  # type: ignore[override]
         """Thread-safe message post (called from executor threads)."""
@@ -258,7 +276,7 @@ class DancodeApp(App):
         tl = self.query_one("#task-list-widget", TaskListWidget)
         tl.tasks = list(self._config.tasks)
         # Remove old worker entry so we can restart
-        self._workers.pop(event.task_id, None)
+        self._agent_workers.pop(event.task_id, None)
         self._start_worker(task)
         self.notify(f"Resumed {task.feature_name}", title="Approved")
 
@@ -266,10 +284,10 @@ class DancodeApp(App):
         task = self._config.get_task(event.task_id)
         if not task:
             return
-        worker = self._workers.pop(event.task_id, None)
+        worker = self._agent_workers.pop(event.task_id, None)
         if worker:
             worker.cancel()
-        asyncio_task = self._asyncio_tasks.pop(event.task_id, None)
+        asyncio_task = self._agent_tasks.pop(event.task_id, None)
         if asyncio_task:
             asyncio_task.cancel()
         task.status = TaskStatus.CANCELLED
@@ -283,10 +301,10 @@ class DancodeApp(App):
         if not task:
             return
         if task.status == TaskStatus.RUNNING:
-            worker = self._workers.pop(event.task_id, None)
+            worker = self._agent_workers.pop(event.task_id, None)
             if worker:
                 worker.cancel()
-            asyncio_task = self._asyncio_tasks.pop(event.task_id, None)
+            asyncio_task = self._agent_tasks.pop(event.task_id, None)
             if asyncio_task:
                 asyncio_task.cancel()
             task.status = TaskStatus.WAITING
@@ -298,7 +316,7 @@ class DancodeApp(App):
             task.blocked_reason = None
             self._config.upsert_task(task)
             self._config.save(self._slug)
-            self._workers.pop(event.task_id, None)
+            self._agent_workers.pop(event.task_id, None)
             self._start_worker(task)
             self.notify("Task resumed.", title="Resumed")
         tl = self.query_one("#task-list-widget", TaskListWidget)

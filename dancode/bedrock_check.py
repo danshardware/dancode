@@ -16,7 +16,7 @@ def validate_bedrock() -> None:
 
     try:
         client = boto3.client("bedrock")
-        client.list_foundation_models(maxResults=1)
+        client.list_foundation_models()
     except (BotoCoreError, ClientError) as exc:
         print(f"ERROR: Cannot reach AWS Bedrock: {exc}")
         print(
