@@ -42,6 +42,19 @@ blocks:
       ### Convention Violations
       Check against AGENTS_MD conventions: {{state.agents_md}}
 
+      ### Coding Standards Compliance
+      The following coding standards MUST be satisfied by every plan.
+      For each standard below, check every task file and flag any task
+      that would produce code violating the standard.
+
+      {{state.coding_standards}}
+
+      For each violation found:
+        RISK: Coding Standards
+        LOCATION: <file> → <section>
+        PROBLEM: which standard is violated and how
+        FIX: exact edit to the plan that ensures the coding model will comply
+
       ### Missing Explicitness
       Flag any step that says "implement X" without saying what X looks like.
       If a plan step says "validate the input", it MUST also say exactly what valid looks like,
