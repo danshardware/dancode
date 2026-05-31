@@ -1,0 +1,27 @@
+# --- Python ---
+__pycache__/
+*.py[oc]
+*.pyo
+
+# --- Virtual environment ---
+.venv/
+
+# --- Environment / secrets ---
+.env
+.env.*
+
+# --- Mutable runtime data (bind-mounted at runtime, not baked into the image) ---
+data/
+
+# --- Instance-specific config (must be created in data/config/ at runtime) ---
+# config/discord.yaml is a template only; never bake a live discord config into the image.
+config/discord.yaml
+
+# --- Development artefacts ---
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# --- Git ---
+.git/

@@ -1,0 +1,108 @@
+id: phase2_jank
+max_iterations: 40
+start: audit
+
+on_error:
+  max_iterations:
+    start: END
+  unhandled:
+    start: END
+
+blocks:
+
+  audit:
+    type: llm
+    system_prompt: |
+      You are a rigorous code plan auditor running Phase 2 (Jank Control) of the dancode loop.
+
+      REPO_PATH: {{state.repo_path}}
+      FEATURE_NAME: {{state.feature_name}}
+
+      Read all files under {{state.repo_path}}/Planning/{{state.feature_name}}/ using list_files
+      then read_file for each. Then audit for these SPECIFIC failure modes:
+
+      ### Lazy Stub Risk
+      Flag any task that could be "satisfied" by a function returning a hardcoded value or
+      raising NotImplementedError. If acceptance criteria can be passed by a stub,
+      rewrite the criteria so they can't.
+
+      ### Test Gaming Risk
+      Flag tests that pass if the implementation does nothing (empty function returning None).
+      Flag tests that only check return value but not side effect, or vice versa.
+      Flag tests that pass on mocks but fail on real code.
+
+      ### Self-Sabotage Risk
+      Flag tasks where the described approach would break existing functionality:
+      - Does this task import from or modify a file that another parallel track also modifies?
+      - Does any type contract break an existing call site?
+      - Does any new function shadow or replace an existing one with a different signature?
+      - Will the new function limit deployment options (e.g. requires on-disk storage when
+        everything else is remote, or adds a new DB technology)?
+
+      ### Convention Violations
+      Check against AGENTS_MD conventions: {{state.agents_md}}
+
+      ### Missing Explicitness
+      Flag any step that says "implement X" without saying what X looks like.
+      If a plan step says "validate the input", it MUST also say exactly what valid looks like,
+      what the error message is, and which code path fires.
+
+      ### Long-Term Debt Risk
+      Flag any instruction that defers a real problem (TODO, placeholder, hardcoded limit,
+      copy-paste with "adjust as needed"). Must either specify how to arrive at the stable
+      value or make it a documented configuration variable.
+
+      For each flag output:
+        RISK: <category>
+        LOCATION: <file> → <section>
+        PROBLEM: one sentence
+        FIX: concrete edit to apply
+
+      After listing all risks, apply every FIX directly to the relevant plan files using
+      replace_in_file or write_file.
+
+      Start by listing files, then read them, then audit.
+
+      Respond ONLY with valid YAML:
+      ```yaml
+      reasoning: "what you are doing"
+      action: list_files  # or: read_file | write_file | replace_in_file | done
+      action_input:
+        path: "{{state.repo_path}}/Planning/{{state.feature_name}}/"
+      ```
+    tools:
+      - list_files
+      - read_file
+      - write_file
+      - replace_in_file
+    transitions:
+      list_files: list_files_block
+      read_file: read_file_block
+      write_file: write_file_block
+      replace_in_file: replace_in_file_block
+      done: END
+      default: audit
+
+  list_files_block:
+    type: tool_call
+    tool: list_files
+    transitions:
+      default: audit
+
+  read_file_block:
+    type: tool_call
+    tool: read_file
+    transitions:
+      default: audit
+
+  write_file_block:
+    type: tool_call
+    tool: write_file
+    transitions:
+      default: audit
+
+  replace_in_file_block:
+    type: tool_call
+    tool: replace_in_file
+    transitions:
+      default: audit

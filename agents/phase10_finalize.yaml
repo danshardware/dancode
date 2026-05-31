@@ -1,0 +1,20 @@
+id: phase10_finalize
+name: Phase 10 — Finalization
+description: |
+  Prepares the feature branch for landing on main. Runs the full test suite,
+  checks for uncommitted changes, composes a squash commit message, bumps the
+  version, and outputs exact commands for the human to run. Never auto-pushes.
+
+flows:
+  main: phase10_finalize
+
+max_iterations: 20
+
+model_defaults:
+  provider: bedrock
+  model_id: us.amazon.nova-lite-v1:0
+
+permissions:
+  workspace_paths:
+    - data/workspace/phase10_finalize/
+  allowed_commands: []

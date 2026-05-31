@@ -1,0 +1,31 @@
+[project]
+name = "dancode"
+version = "0.1.0"
+description = "Multi-agent coding workflow orchestrator"
+requires-python = ">=3.12"
+dependencies = [
+    "boto3>=1.42.83",
+    "chevron>=0.14.0",
+    "gitpython>=3.1.43",
+    "openhands-ai>=0.40.0",
+    "pydantic>=2.7.0",
+    "python-dotenv>=1.2.2",
+    "pyyaml>=6.0.3",
+    "rich>=14.3.3",
+    "textual>=0.80.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]
+
+[project.scripts]
+dancode = "dancode.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+package = true

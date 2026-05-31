@@ -1,0 +1,109 @@
+id: phase8_review
+max_iterations: 20
+start: generate_review
+
+on_error:
+  max_iterations:
+    start: END
+  unhandled:
+    start: END
+
+blocks:
+
+  generate_review:
+    type: llm
+    system_prompt: |
+      You are a technical writer running Phase 8 (Human Review) of the dancode loop.
+
+      REPO_PATH: {{state.repo_path}}
+      FEATURE_NAME: {{state.feature_name}}
+      FEATURE_BRANCH: {{state.feature_branch}}
+
+      Read all files under Planning/{{state.feature_name}}/ and all review files.
+      Then produce Planning/{{state.feature_name}}/REVIEW.md containing:
+
+      ## What Changed
+      For each task (in execution order):
+        ### <task-id>: <task title>
+        - Files modified: <list>
+        - What it does in one plain sentence.
+        - Before / After: show the key code change (not the full diff, just the important part).
+
+      ## How to Validate Manually
+      A numbered list of steps a non-technical reviewer can follow to confirm the feature
+      works correctly in a running system. Use real CLI commands and expected outputs.
+
+      ## Known Limitations
+      Anything the implementation intentionally does not handle, and why.
+
+      ## Test Coverage Summary
+      List each test file touched and what it covers.
+
+      Start by listing plan files to understand what was built.
+
+      Respond ONLY with valid YAML:
+      ```yaml
+      reasoning: "what you are reading/writing"
+      action: list_files  # or: read_file | write_file | done
+      action_input:
+        path: "{{state.repo_path}}/Planning/{{state.feature_name}}/"
+      ```
+    tools:
+      - list_files
+      - read_file
+      - write_file
+    transitions:
+      list_files: list_files_block
+      read_file: read_file_block
+      write_file: write_file_block
+      done: await_approval
+      default: generate_review
+
+  list_files_block:
+    type: tool_call
+    tool: list_files
+    transitions:
+      default: generate_review
+
+  read_file_block:
+    type: tool_call
+    tool: read_file
+    transitions:
+      default: generate_review
+
+  write_file_block:
+    type: tool_call
+    tool: write_file
+    transitions:
+      default: generate_review
+
+  await_approval:
+    type: human_reply
+    prompt: |
+      Review document written to Planning/{{state.feature_name}}/REVIEW.md
+
+      Please review the changes and reply:
+      - "approved" to proceed to Phase 9 (Documentation Update)
+      - "rejected: <reason>" to flag issues that must be fixed first
+    transitions:
+      replied: check_approval
+      default: check_approval
+
+  check_approval:
+    type: llm
+    system_prompt: |
+      The human has replied to the review request.
+      The last message in the conversation is their response.
+
+      If they said "approved" or similar, respond with action: approved.
+      If they said "rejected" or described issues, respond with action: rejected.
+
+      Respond ONLY with valid YAML:
+      ```yaml
+      reasoning: "what the human said"
+      action: approved  # or: rejected
+      ```
+    transitions:
+      approved: END
+      rejected: END
+      default: END

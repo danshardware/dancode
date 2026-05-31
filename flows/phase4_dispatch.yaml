@@ -1,0 +1,133 @@
+id: phase4_dispatch
+max_iterations: 30
+start: read_plan
+
+on_error:
+  max_iterations:
+    start: END
+  unhandled:
+    start: END
+
+blocks:
+
+  read_plan:
+    type: llm
+    system_prompt: |
+      You are a dispatch generator running Phase 4 of the dancode loop.
+
+      REPO_PATH: {{state.repo_path}}
+      FEATURE_NAME: {{state.feature_name}}
+
+      Read Planning/{{state.feature_name}}/README.md and all task files under
+      Planning/{{state.feature_name}}/ using list_files and read_file.
+      When you have read all files, respond with action: generate_dispatch.
+
+      Respond ONLY with valid YAML:
+      ```yaml
+      reasoning: "what you are reading"
+      action: list_files  # or: read_file | generate_dispatch
+      action_input:
+        path: "{{state.repo_path}}/Planning/{{state.feature_name}}/"
+      ```
+    tools:
+      - list_files
+      - read_file
+    transitions:
+      list_files: list_files_block
+      read_file: read_file_block
+      generate_dispatch: generate_dispatch
+      default: read_plan
+
+  list_files_block:
+    type: tool_call
+    tool: list_files
+    transitions:
+      default: read_plan
+
+  read_file_block:
+    type: tool_call
+    tool: read_file
+    transitions:
+      default: read_plan
+
+  generate_dispatch:
+    type: llm
+    system_prompt: |
+      You have read the full plan. Now generate one dispatch prompt per task file.
+
+      REPO_PATH: {{state.repo_path}}
+      FEATURE_NAME: {{state.feature_name}}
+
+      For each task file, write a self-contained dispatch prompt to:
+        {{state.repo_path}}/Planning/{{state.feature_name}}/dispatch/<track>/<task-id>-dispatch.md
+
+      Each dispatch prompt must contain exactly:
+
+      ---
+      TASK: <task file title>
+      SOURCE PLAN: Planning/{{state.feature_name}}/<track>/<task-file>.md
+      ---
+
+      Read the source plan file listed above. Then:
+
+      1. Create a git branch named `FEATURE/<task-id>` based off the current branch.
+         If the branch already exists, check it out.
+
+      2. Read every file listed in the "Files Changed" section of the plan.
+         Do not edit anything yet — understand first.
+
+      3. Implement the changes described in the "Workflow" section step by step.
+         After each numbered step, stop and verify the change compiles / imports cleanly.
+
+      4. Commit with message: "<task-id>: <task title> — initial implementation"
+
+      5. Write the tests described in "Testing Plan". Run them. Fix any failures.
+
+      6. Commit with message: "<task-id>: <task title> — tests passing"
+
+      7. Verify every item in "Acceptance Criteria" is satisfied. For each item,
+         output the assertion or command and its result.
+
+      8. If any criterion fails, fix it now. Do not move on with a failing criterion.
+
+      9. Final commit with message: "<task-id>: <task title> — complete"
+
+      Do not proceed to the next task. Stop here and report: DONE or BLOCKED: <reason>.
+      ---
+
+      Write one file per task, then write the execution schedule to:
+        {{state.repo_path}}/Planning/{{state.feature_name}}/dispatch/SCHEDULE.md
+
+      The schedule must list:
+      - Tasks that can run in parallel (no shared files)
+      - Tasks that must run sequentially (with dependency explanation)
+
+      Respond ONLY with valid YAML:
+      ```yaml
+      reasoning: "which dispatch file you are writing"
+      action: write_file  # or: done
+      action_input:
+        path: "{{state.repo_path}}/Planning/{{state.feature_name}}/dispatch/..."
+        content: |
+          <dispatch prompt content>
+      ```
+    tools:
+      - write_file
+      - read_file
+    transitions:
+      write_file: write_file_block
+      read_file: read_file_block2
+      done: END
+      default: generate_dispatch
+
+  write_file_block:
+    type: tool_call
+    tool: write_file
+    transitions:
+      default: generate_dispatch
+
+  read_file_block2:
+    type: tool_call
+    tool: read_file
+    transitions:
+      default: generate_dispatch

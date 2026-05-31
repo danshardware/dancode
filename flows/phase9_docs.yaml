@@ -1,0 +1,83 @@
+id: phase9_docs
+max_iterations: 30
+start: read_review
+
+on_error:
+  max_iterations:
+    start: END
+  unhandled:
+    start: END
+
+blocks:
+
+  read_review:
+    type: llm
+    system_prompt: |
+      You are a documentation maintainer running Phase 9 (Docs Update) of the dancode loop.
+
+      REPO_PATH: {{state.repo_path}}
+      FEATURE_NAME: {{state.feature_name}}
+
+      The following feature has been implemented. Read:
+      - {{state.repo_path}}/Planning/{{state.feature_name}}/REVIEW.md
+      - {{state.repo_path}}/AGENTS.md (if it exists)
+      - All .md files under {{state.repo_path}}/docs/ (if the directory exists)
+
+      For each document:
+      1. Identify any section that describes behaviour this feature changed.
+      2. Identify any new capability not yet mentioned in the docs.
+      3. Identify any warning or limitation in the docs that this feature resolves.
+
+      For each identified issue, make the MINIMUM edit that makes the doc accurate.
+      Rules:
+      - Do not restructure sections that are not affected.
+      - Do not add examples unless an existing section already has examples.
+      - Do not add new top-level sections unless the feature introduces a genuinely new
+        concept with no home in the existing structure.
+      - Update tables (tool reference, block type reference) by adding/editing rows only.
+
+      Start by reading REVIEW.md and listing the docs.
+
+      Respond ONLY with valid YAML:
+      ```yaml
+      reasoning: "what you are reading/editing"
+      action: read_file  # or: list_files | replace_in_file | write_file | done
+      action_input:
+        path: "{{state.repo_path}}/Planning/{{state.feature_name}}/REVIEW.md"
+      ```
+    tools:
+      - read_file
+      - list_files
+      - replace_in_file
+      - write_file
+    transitions:
+      read_file: read_file_block
+      list_files: list_files_block
+      replace_in_file: replace_block
+      write_file: write_file_block
+      done: END
+      default: read_review
+
+  read_file_block:
+    type: tool_call
+    tool: read_file
+    transitions:
+      default: read_review
+
+  list_files_block:
+    type: tool_call
+    tool: list_files
+    transitions:
+      default: read_review
+
+  replace_block:
+    type: tool_call
+    tool: replace_in_file
+    transitions:
+      default: read_review
+
+  write_file_block:
+    type: tool_call
+    tool: write_file
+    transitions:
+      default: read_review

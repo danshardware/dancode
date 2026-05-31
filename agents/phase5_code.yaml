@@ -1,0 +1,20 @@
+id: phase5_code
+name: Phase 5 — Code
+description: |
+  Dispatches each task to OpenHands in headless mode for implementation.
+  Reads the dispatch schedule, identifies runnable tasks, creates git worktrees,
+  and invokes openhands_dispatch for each task. Tracks DONE/BLOCKED status.
+
+flows:
+  main: phase5_code
+
+max_iterations: 50
+
+model_defaults:
+  provider: bedrock
+  model_id: us.amazon.nova-lite-v1:0
+
+permissions:
+  workspace_paths:
+    - data/workspace/phase5_code/
+  allowed_commands: []

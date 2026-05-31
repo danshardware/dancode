@@ -1,0 +1,21 @@
+id: phase3_refine
+name: Phase 3 — Refine
+description: |
+  Ensures every plan file has enough explicit detail that a coding model with
+  no memory of this conversation can execute it correctly on the first attempt.
+  Adds precision to Type Contracts, Workflow steps, Acceptance Criteria, and
+  Testing Plan stubs. Updates README.md execution map if needed.
+
+flows:
+  main: phase3_refine
+
+max_iterations: 35
+
+model_defaults:
+  provider: bedrock
+  model_id: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+
+permissions:
+  workspace_paths:
+    - data/workspace/phase3_refine/
+  allowed_commands: []

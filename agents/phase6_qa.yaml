@@ -1,0 +1,20 @@
+id: phase6_qa
+name: Phase 6 — QA
+description: |
+  Independently verifies that each completed task branch matches its plan,
+  follows standards, and cannot be passed by a fake implementation.
+  Dispatches QA review via OpenHands and writes review files.
+
+flows:
+  main: phase6_qa
+
+max_iterations: 50
+
+model_defaults:
+  provider: bedrock
+  model_id: us.amazon.nova-lite-v1:0
+
+permissions:
+  workspace_paths:
+    - data/workspace/phase6_qa/
+  allowed_commands: []

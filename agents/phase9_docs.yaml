@@ -1,0 +1,19 @@
+id: phase9_docs
+name: Phase 9 — Documentation Update
+description: |
+  Updates project documentation to reflect the new feature. Reads AGENTS.md,
+  docs/, and REVIEW.md, then makes minimum edits to keep docs accurate.
+
+flows:
+  main: phase9_docs
+
+max_iterations: 30
+
+model_defaults:
+  provider: bedrock
+  model_id: deepseek.v3.2
+
+permissions:
+  workspace_paths:
+    - data/workspace/phase9_docs/
+  allowed_commands: []

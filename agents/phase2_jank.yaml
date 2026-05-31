@@ -1,0 +1,20 @@
+id: phase2_jank
+name: Phase 2 — Jank Control
+description: |
+  Audits all files under Planning/<FeatureName>/ for implementation risk.
+  Checks for lazy stub risk, test gaming, self-sabotage, convention violations,
+  missing explicitness, and long-term debt. Applies fixes directly to plan files.
+
+flows:
+  main: phase2_jank
+
+max_iterations: 40
+
+model_defaults:
+  provider: bedrock
+  model_id: us.anthropic.claude-opus-4-5-20251101-v1:0
+
+permissions:
+  workspace_paths:
+    - data/workspace/phase2_jank/
+  allowed_commands: []

@@ -1,0 +1,21 @@
+id: phase4_dispatch
+name: Phase 4 — Dispatch
+description: |
+  Reads Planning/<FeatureName>/README.md and all task files, then generates
+  one self-contained dispatch prompt per task at
+  Planning/<FeatureName>/dispatch/<track>/<task-id>-dispatch.md.
+  Also outputs a plain-English execution schedule.
+
+flows:
+  main: phase4_dispatch
+
+max_iterations: 30
+
+model_defaults:
+  provider: bedrock
+  model_id: us.amazon.nova-lite-v1:0
+
+permissions:
+  workspace_paths:
+    - data/workspace/phase4_dispatch/
+  allowed_commands: []

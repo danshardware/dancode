@@ -1,0 +1,212 @@
+id: phase1_plan
+max_iterations: 40
+start: gather_context
+
+on_error:
+  max_iterations:
+    start: compile_plan
+  unhandled:
+    start: compile_plan
+
+blocks:
+
+  gather_context:
+    type: llm
+    system_prompt: |
+      You are a senior software architect running Phase 1 of the dancode planning loop.
+
+      The user has provided:
+      - REPO_PATH: {{state.repo_path}}
+      - FEATURE_DESCRIPTION: {{state.feature_description}}
+      - AGENTS_MD: {{state.agents_md}}
+
+      Your task: produce a complete Planning/<FeatureName>/ directory tree that a
+      low-reasoning coding model can execute mechanically.
+
+      Follow this process STRICTLY — do not skip ahead:
+
+      Step 1 (this turn): Ask 3-5 targeted questions about scope, constraints, and goals.
+      Wait for answers before continuing.
+
+      Questions should probe:
+      - What existing code must this feature integrate with?
+      - Are there hard constraints (perf, backward compat, external API contracts)?
+      - What is the expected user-visible behaviour?
+      - Are there files/modules that MUST NOT change?
+      - What is the definition of "done" from the user's perspective?
+
+      Respond ONLY with valid YAML:
+      ```yaml
+      reasoning: "your analysis of the feature request"
+      action: ask_questions
+      action_input:
+        questions: |
+          1. <question>
+          2. <question>
+          3. <question>
+      ```
+    transitions:
+      ask_questions: wait_for_answers
+      draft_tracks: draft_tracks
+      write_plan: write_plan
+      done: END
+      default: gather_context
+
+  wait_for_answers:
+    type: human_reply
+    prompt: |
+      Please answer the planning questions above. Be as specific as possible —
+      your answers directly control the quality of the generated plan.
+    transitions:
+      replied: draft_tracks
+      default: draft_tracks
+
+  draft_tracks:
+    type: llm
+    system_prompt: |
+      You are a senior software architect. The user has answered your scoping questions.
+
+      REPO_PATH: {{state.repo_path}}
+      FEATURE: {{state.feature_description}}
+      AGENTS_MD conventions: {{state.agents_md}}
+
+      Now draft the parallel tracks of work:
+      - A track is a sequence of tasks that must run one-after-the-other.
+      - Multiple tracks MAY run in parallel if they touch NO shared files.
+      - Tracks may be nested up to 5 levels if a parallel group unlocks after a prior task.
+
+      Present:
+      1. The tracks with names and short descriptions
+      2. The parallelism explanation (which tracks can run together and why)
+      3. A README.md execution map outline
+
+      Then ask the user to confirm before writing any files.
+
+      Respond ONLY with valid YAML:
+      ```yaml
+      reasoning: "track design rationale"
+      action: confirm_tracks
+      action_input:
+        tracks_outline: |
+          Track A — <name>: <description>
+            A1: <task>
+            A2: <task>
+          Track B — <name>: <description>
+            B1: <task>
+          ...
+        parallelism: "Track A and B can run in parallel because ..."
+      ```
+    transitions:
+      confirm_tracks: confirm_tracks_gate
+      write_plan: write_plan
+      default: draft_tracks
+
+  confirm_tracks_gate:
+    type: human_reply
+    prompt: |
+      Review the track outline above.
+      Reply "approved" to proceed, or describe any changes needed.
+    transitions:
+      replied: write_plan
+      default: write_plan
+
+  write_plan:
+    type: llm
+    system_prompt: |
+      You are a senior software architect. The track design has been confirmed.
+
+      REPO_PATH: {{state.repo_path}}
+      FEATURE: {{state.feature_description}}
+      AGENTS_MD: {{state.agents_md}}
+
+      Now write ALL plan files to disk using write_file.
+
+      Directory structure:
+        Planning/<FeatureName>/
+          README.md              ← execution map and dependency summary
+          Track-A-<name>/
+            A1-<slug>.md
+            A2-<slug>.md
+          Track-B-<name>/
+            B1-<slug>.md
+
+      Each task file MUST contain ALL of these sections — no exceptions:
+
+      ## Overview
+      One paragraph. What this task does, why it exists, which file(s) it touches.
+      State upstream dependencies.
+
+      ## Files Changed
+      Bullet list: path → what changes (new file | modified | deleted).
+
+      ## Type Contracts
+      Exact function/class signatures for anything new or changed.
+      Include parameter names, types, return type, mutations to shared state.
+      Include a short usage example for non-trivial functions.
+
+      ## Workflow
+      Numbered step-by-step instructions. Each step = one concrete action.
+      Include code snippets where a coding model could get it wrong.
+
+      ## Acceptance Criteria
+      Testable, binary pass/fail checks. Each must be observable without running the full system.
+      No subjective criteria.
+
+      ## Testing Plan
+      Exact test function names, what they assert, representative input/output.
+      Specify if test requires real external calls or can use fixtures.
+
+      Write README.md last (after all task files) to include accurate execution map.
+
+      Use write_file for EACH file. Use path: {{state.repo_path}}/Planning/<FeatureName>/...
+
+      When ALL files are written, respond with action: done.
+
+      Respond ONLY with valid YAML:
+      ```yaml
+      reasoning: "what you are about to write"
+      action: write_file  # or: done
+      action_input:
+        path: "{{state.repo_path}}/Planning/<FeatureName>/<track>/<file>.md"
+        content: |
+          <full file content>
+      ```
+    tools:
+      - write_file
+      - read_file
+      - list_files
+    transitions:
+      write_file: write_file_block
+      done: END
+      default: write_plan
+
+  write_file_block:
+    type: tool_call
+    tool: write_file
+    transitions:
+      default: write_plan
+
+  compile_plan:
+    type: llm
+    system_prompt: |
+      You hit the iteration limit or an error while writing the plan.
+      Write a partial README.md to {{state.repo_path}}/Planning/<FeatureName>/README.md
+      summarising what was completed and what remains.
+      Then respond with action: done.
+
+      Respond ONLY with valid YAML:
+      ```yaml
+      reasoning: "what was completed"
+      action: write_file
+      action_input:
+        path: "{{state.repo_path}}/Planning/<FeatureName>/README.md"
+        content: |
+          # PARTIAL PLAN — hit iteration limit
+          ...
+      ```
+    tools:
+      - write_file
+    transitions:
+      write_file: write_file_block
+      done: END
+      default: END

@@ -1,0 +1,89 @@
+id: phase6_qa
+max_iterations: 50
+start: list_tasks
+
+on_error:
+  max_iterations:
+    start: END
+  unhandled:
+    start: END
+
+blocks:
+
+  list_tasks:
+    type: llm
+    system_prompt: |
+      You are a QA coordinator running Phase 6 of the dancode loop.
+
+      REPO_PATH: {{state.repo_path}}
+      FEATURE_NAME: {{state.feature_name}}
+      OPENHANDS_MODEL: {{state.openhands_model}}
+
+      Read the phase5 status file at:
+        {{state.repo_path}}/Planning/{{state.feature_name}}/phase5_status.md
+
+      For each task that reported DONE in Phase 5, you need to run a QA review.
+
+      For each DONE task, create a QA dispatch file at:
+        {{state.repo_path}}/Planning/{{state.feature_name}}/dispatch/<track>/<task-id>-qa.md
+
+      The QA dispatch file content:
+      ---
+      You are a code reviewer. You have no stake in whether this code passes.
+
+      Branch under review: FEATURE/<task-id>
+      Source plan: Planning/{{state.feature_name}}/<track>/<task-file>.md
+
+      Check for prior reviews in Planning/{{state.feature_name}}/reviews/
+      Then work through:
+
+      STANDARDS CHECK: type hints, docstrings, imports, tool patterns per AGENTS.md
+      ACCEPTANCE CRITERIA CHECK: For each criterion: PASS / FAIL / CANNOT VERIFY
+      TEST INTEGRITY CHECK: Does each test exist? Would a stub pass it? Does it assert side effects?
+      SCOPE CHECK: Unexpected file changes? Type contract mismatches? Hardcoded values? TODOs?
+
+      VERDICT: PASS | PASS WITH NOTES | FAIL (list blocking issues)
+
+      Save review to: Planning/{{state.feature_name}}/reviews/<task-id>-review.md
+      ---
+
+      Then invoke openhands_dispatch for each QA dispatch file using the worktree:
+        {{state.repo_path}}/../{{state.feature_name}}-worktrees/<task-id>/
+
+      Start by reading the phase5 status file.
+
+      Respond ONLY with valid YAML:
+      ```yaml
+      reasoning: "what you are doing"
+      action: read_file  # or: write_file | openhands_dispatch | done
+      action_input:
+        path: "{{state.repo_path}}/Planning/{{state.feature_name}}/phase5_status.md"
+      ```
+    tools:
+      - read_file
+      - write_file
+      - openhands_dispatch
+    transitions:
+      read_file: read_file_block
+      write_file: write_file_block
+      openhands_dispatch: openhands_block
+      done: END
+      default: list_tasks
+
+  read_file_block:
+    type: tool_call
+    tool: read_file
+    transitions:
+      default: list_tasks
+
+  write_file_block:
+    type: tool_call
+    tool: write_file
+    transitions:
+      default: list_tasks
+
+  openhands_block:
+    type: tool_call
+    tool: openhands_dispatch
+    transitions:
+      default: list_tasks

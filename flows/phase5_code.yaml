@@ -1,0 +1,110 @@
+id: phase5_code
+max_iterations: 50
+start: read_schedule
+
+on_error:
+  max_iterations:
+    start: report_status
+  unhandled:
+    start: report_status
+
+blocks:
+
+  read_schedule:
+    type: llm
+    system_prompt: |
+      You are an execution coordinator running Phase 5 (Code) of the dancode loop.
+
+      REPO_PATH: {{state.repo_path}}
+      FEATURE_NAME: {{state.feature_name}}
+      OPENHANDS_MODEL: {{state.openhands_model}}
+
+      Read the dispatch schedule at:
+        {{state.repo_path}}/Planning/{{state.feature_name}}/dispatch/SCHEDULE.md
+
+      Then list all dispatch files:
+        {{state.repo_path}}/Planning/{{state.feature_name}}/dispatch/
+
+      For each task in the schedule (in the order they can run), you will:
+      1. Create a git worktree for the task branch using git_worktree_create
+      2. Run openhands_dispatch with the dispatch file and the worktree path
+      3. Record the result (DONE or BLOCKED)
+
+      Worktree path convention: {{state.repo_path}}/../{{state.feature_name}}-worktrees/<task-id>/
+
+      Start by reading the schedule file.
+
+      Respond ONLY with valid YAML:
+      ```yaml
+      reasoning: "what you are doing"
+      action: read_file  # or: list_files | git_worktree_create | openhands_dispatch | done
+      action_input:
+        path: "{{state.repo_path}}/Planning/{{state.feature_name}}/dispatch/SCHEDULE.md"
+      ```
+    tools:
+      - read_file
+      - list_files
+      - git_worktree_create
+      - openhands_dispatch
+    transitions:
+      read_file: read_file_block
+      list_files: list_files_block
+      git_worktree_create: git_worktree_block
+      openhands_dispatch: openhands_block
+      done: END
+      default: read_schedule
+
+  read_file_block:
+    type: tool_call
+    tool: read_file
+    transitions:
+      default: read_schedule
+
+  list_files_block:
+    type: tool_call
+    tool: list_files
+    transitions:
+      default: read_schedule
+
+  git_worktree_block:
+    type: tool_call
+    tool: git_worktree_create
+    transitions:
+      default: read_schedule
+
+  openhands_block:
+    type: tool_call
+    tool: openhands_dispatch
+    transitions:
+      default: read_schedule
+
+  report_status:
+    type: llm
+    system_prompt: |
+      Summarise the coding phase status. List which tasks completed (DONE),
+      which are blocked (BLOCKED: reason), and which did not run.
+      Write the summary to:
+        {{state.repo_path}}/Planning/{{state.feature_name}}/phase5_status.md
+
+      Respond ONLY with valid YAML:
+      ```yaml
+      reasoning: "status summary"
+      action: write_file
+      action_input:
+        path: "{{state.repo_path}}/Planning/{{state.feature_name}}/phase5_status.md"
+        content: |
+          # Phase 5 Status
+          ...
+      ```
+    tools:
+      - write_file
+    transitions:
+      write_file: status_write_block
+      done: END
+      default: END
+
+  status_write_block:
+    type: tool_call
+    tool: write_file
+    transitions:
+      default: END

@@ -1,0 +1,25 @@
+services:
+  dancode:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: dancode:latest
+    stdin_open: true
+    tty: true
+    volumes:
+      # Persist dancode config/state/logs across container runs
+      - "${HOME}/.config/dancode:/home/council/.config/dancode"
+      # Mount your target repo as /repo (override REPO_PATH if needed)
+      - "${REPO_PATH:-./}:/repo"
+    environment:
+      # AWS credentials — inherited from host environment
+      - AWS_REGION
+      - AWS_DEFAULT_REGION
+      - AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY
+      - AWS_SESSION_TOKEN
+      - AWS_PROFILE
+      # Point dancode data dir at the bind-mounted config volume
+      - COUNCIL_DATA_DIR=/home/council/.config/dancode
+    working_dir: /app
+    # No ports exposed — dancode is a local TUI only

@@ -1,0 +1,23 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Actual environment
+.env
+.env.*
+
+# All mutable state lives under data/ (mounted volume in production)
+# Old locations kept here during transition period
+/data/
+logs/
+workspace/
+memory_db/
+messages/
+shared_knowledge/

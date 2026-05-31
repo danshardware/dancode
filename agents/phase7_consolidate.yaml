@@ -1,0 +1,19 @@
+id: phase7_consolidate
+name: Phase 7 — Consolidation
+description: |
+  Merges all QA-passed task branches back into the feature branch using
+  squash-merge in dependency order. Runs the full test suite after each merge.
+
+flows:
+  main: phase7_consolidate
+
+max_iterations: 30
+
+model_defaults:
+  provider: bedrock
+  model_id: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+
+permissions:
+  workspace_paths:
+    - data/workspace/phase7_consolidate/
+  allowed_commands: []

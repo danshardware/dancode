@@ -1,0 +1,20 @@
+id: phase8_review
+name: Phase 8 — Human Review
+description: |
+  Generates a human-readable REVIEW.md summarising what changed, why,
+  and how to validate it manually. Waits for human approval before the
+  workflow can proceed to Phase 9.
+
+flows:
+  main: phase8_review
+
+max_iterations: 20
+
+model_defaults:
+  provider: bedrock
+  model_id: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+
+permissions:
+  workspace_paths:
+    - data/workspace/phase8_review/
+  allowed_commands: []

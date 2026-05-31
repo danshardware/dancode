@@ -1,0 +1,108 @@
+id: phase7_consolidate
+max_iterations: 30
+start: read_reviews
+
+on_error:
+  max_iterations:
+    start: report_blocked
+  unhandled:
+    start: report_blocked
+
+blocks:
+
+  read_reviews:
+    type: llm
+    system_prompt: |
+      You are a consolidation agent running Phase 7 of the dancode loop.
+
+      REPO_PATH: {{state.repo_path}}
+      FEATURE_NAME: {{state.feature_name}}
+
+      Read all review files under:
+        {{state.repo_path}}/Planning/{{state.feature_name}}/reviews/
+
+      And the dispatch schedule:
+        {{state.repo_path}}/Planning/{{state.feature_name}}/dispatch/SCHEDULE.md
+
+      Identify all tasks with verdict PASS or PASS WITH NOTES (skip FAIL verdicts).
+      Determine merge order from the schedule (respecting dependencies).
+
+      Then squash-merge each passing task branch into the feature branch using
+      git_squash_merge in dependency order.
+
+      Merge message format: "Merge <task-id>: <task title>"
+
+      After all merges, write consolidation status to:
+        {{state.repo_path}}/Planning/{{state.feature_name}}/phase7_status.md
+
+      List: CONSOLIDATION COMPLETE (all merged) or BLOCKED: <task-id> <reason>
+
+      Start by listing the review files.
+
+      Respond ONLY with valid YAML:
+      ```yaml
+      reasoning: "what you are doing"
+      action: list_files  # or: read_file | git_squash_merge | write_file | done
+      action_input:
+        path: "{{state.repo_path}}/Planning/{{state.feature_name}}/reviews/"
+      ```
+    tools:
+      - list_files
+      - read_file
+      - git_squash_merge
+      - write_file
+    transitions:
+      list_files: list_files_block
+      read_file: read_file_block
+      git_squash_merge: merge_block
+      write_file: write_file_block
+      done: END
+      default: read_reviews
+
+  list_files_block:
+    type: tool_call
+    tool: list_files
+    transitions:
+      default: read_reviews
+
+  read_file_block:
+    type: tool_call
+    tool: read_file
+    transitions:
+      default: read_reviews
+
+  merge_block:
+    type: tool_call
+    tool: git_squash_merge
+    transitions:
+      default: read_reviews
+
+  write_file_block:
+    type: tool_call
+    tool: write_file
+    transitions:
+      default: read_reviews
+
+  report_blocked:
+    type: llm
+    system_prompt: |
+      The consolidation hit an error or iteration limit. Write a status file at:
+        {{state.repo_path}}/Planning/{{state.feature_name}}/phase7_status.md
+      listing what was merged and what is blocked.
+
+      Respond ONLY with valid YAML:
+      ```yaml
+      reasoning: "partial consolidation status"
+      action: write_file
+      action_input:
+        path: "{{state.repo_path}}/Planning/{{state.feature_name}}/phase7_status.md"
+        content: |
+          # Phase 7 Status — INCOMPLETE
+          ...
+      ```
+    tools:
+      - write_file
+    transitions:
+      write_file: write_file_block
+      done: END
+      default: END

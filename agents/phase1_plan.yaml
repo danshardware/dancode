@@ -1,0 +1,21 @@
+id: phase1_plan
+name: Phase 1 — Plan
+description: |
+  Generates the Planning/<FeatureName>/ directory tree for a new feature.
+  Asks 3-5 targeted questions, drafts parallel tracks of work, then writes
+  all task files with Overview, Files Changed, Type Contracts, Workflow,
+  Acceptance Criteria, and Testing Plan sections.
+
+flows:
+  main: phase1_plan
+
+max_iterations: 40
+
+model_defaults:
+  provider: bedrock
+  model_id: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+
+permissions:
+  workspace_paths:
+    - data/workspace/phase1_plan/
+  allowed_commands: []
