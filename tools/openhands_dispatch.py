@@ -12,31 +12,53 @@ from tools import ToolContext, tool
 
 @tool
 def openhands_dispatch(
-    dispatch_file: str,
     worktree_path: str,
     model_id: str,
     context: ToolContext,
+    dispatch_file: str = "",
+    dispatch_content: str = "",
 ) -> str:
-    """Run OpenHands in headless mode against a dispatch prompt file.
+    """Run OpenHands in headless mode against a dispatch prompt.
 
     Spawns: openhands --headless --json --always-approve -f <dispatch_file>
     in the given worktree directory, with LLM_MODEL overridden to model_id.
+
+    Provide EITHER dispatch_file (path to an existing .md file) OR
+    dispatch_content (inline prompt text — written to .openhands-dispatch.md
+    inside the worktree before running).
 
     Streams JSONL events to the session log and returns "DONE" on success
     or "BLOCKED: <reason>" if OpenHands exits with an error.
 
     model_id example: "minimax.minimax-m2.5" or "us.anthropic.claude-haiku-*"
     """
-    dispatch = Path(dispatch_file).resolve()
-    if not dispatch.exists():
-        return f"[ERROR] Dispatch file not found: {dispatch_file}"
-
     worktree = Path(worktree_path).resolve()
     if not worktree.exists():
         return f"[ERROR] Worktree path not found: {worktree_path}"
 
+    if dispatch_content:
+        dispatch = worktree / ".openhands-dispatch.md"
+        dispatch.write_text(dispatch_content)
+    elif dispatch_file:
+        dispatch = Path(dispatch_file).resolve()
+        if not dispatch.exists():
+            return f"[ERROR] Dispatch file not found: {dispatch_file}"
+    else:
+        return "[ERROR] Provide either dispatch_file or dispatch_content."
+
+    # LiteLLM requires the "bedrock/" provider prefix for Bedrock models
+    litellm_model = model_id if model_id.startswith("bedrock/") else f"bedrock/{model_id}"
     env = os.environ.copy()
-    env["LLM_MODEL"] = model_id
+    env["LLM_MODEL"] = litellm_model
+    # --override-with-envs requires LLM_API_KEY; Bedrock uses IAM auth, so any value works
+    env.setdefault("LLM_API_KEY", "bedrock")
+    # Prevent any subprocess from opening an interactive pager or editor
+    env["PAGER"] = "cat"
+    env["GIT_PAGER"] = "cat"
+    env["EDITOR"] = "true"
+    env["VISUAL"] = "true"
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["DEBIAN_FRONTEND"] = "noninteractive"
 
     cmd = [
         "openhands",

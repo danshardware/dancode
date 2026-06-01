@@ -1,110 +1,104 @@
 id: phase5_code
-max_iterations: 50
-start: read_schedule
+max_iterations: 8
+start: coordinator
+
+# Per-task flow — called once per task by run_loop.py.
+# Does exactly 3 things: create-worktree → code → QA.
+# run_loop.py handles reading/copying the review and writing phase5_status.md.
+#
+# Required state variables (set by run_loop.py):
+#   task_id            e.g. "001"
+#   track_name         e.g. "track-a"
+#   dispatch_file      absolute path to the coding dispatch .md file
+#   worktree_path      absolute path to the task worktree (pre-computed)
+#   repo_path          absolute path to main repo
+#   feature_name       e.g. "usability-improvements"
+#   openhands_model    e.g. "minimax.minimax-m2.5"
 
 on_error:
   max_iterations:
-    start: report_status
+    start: END
   unhandled:
-    start: report_status
+    start: END
 
 blocks:
 
-  read_schedule:
+  coordinator:
     type: llm
     system_prompt: |
-      You are an execution coordinator running Phase 5 (Code) of the dancode loop.
+      Execute Phase 5 for ONE task. Do these 3 steps in order. ONE action per response.
 
-      REPO_PATH: {{state.repo_path}}
-      FEATURE_NAME: {{state.feature_name}}
-      OPENHANDS_MODEL: {{state.openhands_model}}
+      TASK:     {{state.task_id}}
+      WORKTREE: {{state.worktree_path}}
+      DISPATCH: {{state.dispatch_file}}
+      MODEL:    {{state.openhands_model}}
+      FEATURE:  {{state.feature_name}}
+      REPO:     {{state.repo_path}}
+      TRACK:    {{state.track_name}}
 
-      Read the dispatch schedule at:
-        {{state.repo_path}}/Planning/{{state.feature_name}}/dispatch/SCHEDULE.md
+      STEP 1 — Create/get worktree:
+        ```yaml
+        action: git_worktree_create
+        action_input:
+          repo_path: "{{state.repo_path}}"
+          branch: "{{state.feature_name}}/{{state.track_name}}/{{state.task_id}}"
+          dest_path: "{{state.worktree_path}}"
+        ```
+        "[ERROR] Destination already exists" is OK — the worktree is ready.
 
-      Then list all dispatch files:
-        {{state.repo_path}}/Planning/{{state.feature_name}}/dispatch/
+      STEP 2 — Code the task:
+        ```yaml
+        action: openhands_dispatch
+        action_input:
+          worktree_path: "{{state.worktree_path}}"
+          dispatch_file: "{{state.dispatch_file}}"
+          model_id: "{{state.openhands_model}}"
+        ```
 
-      For each task in the schedule (in the order they can run), you will:
-      1. Create a git worktree for the task branch using git_worktree_create
-      2. Run openhands_dispatch with the dispatch file and the worktree path
-      3. Record the result (DONE or BLOCKED)
+      STEP 3 — QA review:
+        ```yaml
+        action: openhands_dispatch
+        action_input:
+          worktree_path: "{{state.worktree_path}}"
+          model_id: "{{state.openhands_model}}"
+          dispatch_content: |
+            Review the code changes in this repository.
+            1. Run: git log --oneline -5
+            2. Run: git diff HEAD~1 HEAD
+            3. Read the task spec at: {{state.dispatch_file}}
+            4. Write your complete review to:
+               Planning/{{state.feature_name}}/reviews/{{state.task_id}}-review.md
+            End the review file with EXACTLY ONE of:
+            VERDICT: PASS
+            VERDICT: PASS WITH NOTES
+            VERDICT: FAIL
+            (If FAIL, list each blocking issue starting with "- ")
+        ```
 
-      Worktree path convention: {{state.repo_path}}/../{{state.feature_name}}-worktrees/<task-id>/
-
-      Start by reading the schedule file.
-
-      Respond ONLY with valid YAML:
+      After STEP 3 completes, emit:
       ```yaml
-      reasoning: "what you are doing"
-      action: read_file  # or: list_files | git_worktree_create | openhands_dispatch | done
-      action_input:
-        path: "{{state.repo_path}}/Planning/{{state.feature_name}}/dispatch/SCHEDULE.md"
+      action: done
       ```
+      NEVER read or write files yourself. NEVER retry any step.
     tools:
-      - read_file
-      - list_files
       - git_worktree_create
       - openhands_dispatch
     transitions:
-      read_file: read_file_block
-      list_files: list_files_block
       git_worktree_create: git_worktree_block
       openhands_dispatch: openhands_block
       done: END
-      default: read_schedule
-
-  read_file_block:
-    type: tool_call
-    tool: read_file
-    transitions:
-      default: read_schedule
-
-  list_files_block:
-    type: tool_call
-    tool: list_files
-    transitions:
-      default: read_schedule
+      default: coordinator
 
   git_worktree_block:
     type: tool_call
     tool: git_worktree_create
     transitions:
-      default: read_schedule
+      default: coordinator
 
   openhands_block:
     type: tool_call
     tool: openhands_dispatch
     transitions:
-      default: read_schedule
+      default: coordinator
 
-  report_status:
-    type: llm
-    system_prompt: |
-      Summarise the coding phase status. List which tasks completed (DONE),
-      which are blocked (BLOCKED: reason), and which did not run.
-      Write the summary to:
-        {{state.repo_path}}/Planning/{{state.feature_name}}/phase5_status.md
 
-      Respond ONLY with valid YAML:
-      ```yaml
-      reasoning: "status summary"
-      action: write_file
-      action_input:
-        path: "{{state.repo_path}}/Planning/{{state.feature_name}}/phase5_status.md"
-        content: |
-          # Phase 5 Status
-          ...
-      ```
-    tools:
-      - write_file
-    transitions:
-      write_file: status_write_block
-      done: END
-      default: END
-
-  status_write_block:
-    type: tool_call
-    tool: write_file
-    transitions:
-      default: END

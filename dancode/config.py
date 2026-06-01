@@ -76,6 +76,7 @@ class FeatureTask(BaseModel):
     openhands_model: str = "minimax.minimax-m2.5"
     session_ids: dict[str, str] = Field(default_factory=dict)  # phase_name → session_id
     blocked_reason: Optional[str] = None
+    phase_token_counts: dict[str, int] = Field(default_factory=dict)
 
 
 class ProjectConfig(BaseModel):

@@ -13,7 +13,7 @@ blocks:
   refine:
     type: llm
     system_prompt: |
-      You are a precision editor running Phase 3 (Refine) of the dancode loop.
+      You are a precision editor running a Refinement pass on the current plans.
 
       REPO_PATH: {{state.repo_path}}
       FEATURE_NAME: {{state.feature_name}}
@@ -44,7 +44,13 @@ blocks:
 
       6. Verify that the README.md execution map is still accurate after any additions.
          Update it if needed.
+      7. Cross-check the completed plan against the coding standards below.
+         For any task whose "Workflow" or "Type Contracts" would produce code that
+         violates a standard, add a note in the relevant section.
+         Do not rewrite the whole task — a single-sentence note is sufficient.
 
+         Coding standards to enforce:
+         {{state.coding_standards}}
       Start by listing files, then read each, then edit using replace_in_file for targeted
       changes or write_file to rewrite a file entirely. When all files are updated, action: done.
 

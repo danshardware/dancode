@@ -1,6 +1,6 @@
 id: phase4_dispatch
 max_iterations: 30
-start: read_plan
+start: dispatch_coordinator
 
 on_error:
   max_iterations:
@@ -10,58 +10,23 @@ on_error:
 
 blocks:
 
-  read_plan:
+  dispatch_coordinator:
     type: llm
     system_prompt: |
-      You are a dispatch generator running Phase 4 of the dancode loop.
+      You are tasked with writing the coding dispatch documents for a software feature.
 
       REPO_PATH: {{state.repo_path}}
       FEATURE_NAME: {{state.feature_name}}
 
-      Read Planning/{{state.feature_name}}/README.md and all task files under
-      Planning/{{state.feature_name}}/ using list_files and read_file.
-      When you have read all files, respond with action: generate_dispatch.
+      PHASE 1 — READ THE PLAN:
+      Use list_files and read_file to read Planning/{{state.feature_name}}/README.md
+      and all task files under Planning/{{state.feature_name}}/.
 
-      Respond ONLY with valid YAML:
-      ```yaml
-      reasoning: "what you are reading"
-      action: list_files  # or: read_file | generate_dispatch
-      action_input:
-        path: "{{state.repo_path}}/Planning/{{state.feature_name}}/"
-      ```
-    tools:
-      - list_files
-      - read_file
-    transitions:
-      list_files: list_files_block
-      read_file: read_file_block
-      generate_dispatch: generate_dispatch
-      default: read_plan
-
-  list_files_block:
-    type: tool_call
-    tool: list_files
-    transitions:
-      default: read_plan
-
-  read_file_block:
-    type: tool_call
-    tool: read_file
-    transitions:
-      default: read_plan
-
-  generate_dispatch:
-    type: llm
-    system_prompt: |
-      You have read the full plan. Now generate one dispatch prompt per task file.
-
-      REPO_PATH: {{state.repo_path}}
-      FEATURE_NAME: {{state.feature_name}}
-
-      For each task file, write a self-contained dispatch prompt to:
+      PHASE 2 — WRITE DISPATCH FILES:
+      Once you have read all plan files, write one dispatch prompt per task to:
         {{state.repo_path}}/Planning/{{state.feature_name}}/dispatch/<track>/<task-id>-dispatch.md
 
-      Each dispatch prompt must contain exactly:
+      Each dispatch file must contain exactly:
 
       ---
       TASK: <task file title>
@@ -95,39 +60,48 @@ blocks:
       Do not proceed to the next task. Stop here and report: DONE or BLOCKED: <reason>.
       ---
 
-      Write one file per task, then write the execution schedule to:
+      PHASE 3 — WRITE SCHEDULE:
+      After all dispatch files are written, write the execution schedule to:
         {{state.repo_path}}/Planning/{{state.feature_name}}/dispatch/SCHEDULE.md
 
       The schedule must list:
       - Tasks that can run in parallel (no shared files)
       - Tasks that must run sequentially (with dependency explanation)
 
+      When the schedule is written, respond with action: done.
+
       Respond ONLY with valid YAML:
       ```yaml
-      reasoning: "which dispatch file you are writing"
-      action: write_file  # or: done
+      reasoning: "what you are doing"
+      action: list_files  # or: read_file | write_file | done
       action_input:
-        path: "{{state.repo_path}}/Planning/{{state.feature_name}}/dispatch/..."
-        content: |
-          <dispatch prompt content>
+        path: "..."
       ```
     tools:
-      - write_file
+      - list_files
       - read_file
+      - write_file
     transitions:
+      list_files: list_files_block
+      read_file: read_file_block
       write_file: write_file_block
-      read_file: read_file_block2
       done: END
-      default: generate_dispatch
+      default: dispatch_coordinator
+
+  list_files_block:
+    type: tool_call
+    tool: list_files
+    transitions:
+      default: dispatch_coordinator
+
+  read_file_block:
+    type: tool_call
+    tool: read_file
+    transitions:
+      default: dispatch_coordinator
 
   write_file_block:
     type: tool_call
     tool: write_file
     transitions:
-      default: generate_dispatch
-
-  read_file_block2:
-    type: tool_call
-    tool: read_file
-    transitions:
-      default: generate_dispatch
+      default: dispatch_coordinator

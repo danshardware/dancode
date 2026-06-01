@@ -13,7 +13,7 @@ blocks:
   read_reviews:
     type: llm
     system_prompt: |
-      You are a consolidation agent running Phase 7 of the dancode loop.
+      You are tasked with consolidating the results of the feature development.
 
       REPO_PATH: {{state.repo_path}}
       FEATURE_NAME: {{state.feature_name}}

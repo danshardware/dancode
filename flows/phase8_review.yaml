@@ -13,7 +13,7 @@ blocks:
   generate_review:
     type: llm
     system_prompt: |
-      You are a technical writer running Phase 8 (Human Review) of the dancode loop.
+      You are a technical writer helping to run Phase 8 (Human Review) of a feature development loop.
 
       REPO_PATH: {{state.repo_path}}
       FEATURE_NAME: {{state.feature_name}}

@@ -18,6 +18,29 @@ if TYPE_CHECKING:
     from dancode.config import FeatureTask, TaskPhase
 
 
+def _load_guidance_docs(repo_root: Path) -> tuple[str, str]:
+    """Load AGENTS.md and skill SKILL.md files from the dancode repo root.
+
+    Returns:
+        agents_md: Content of AGENTS.md.
+        coding_standards: Concatenated content of all .agents/skills/*/SKILL.md files,
+            each prefixed with a header line showing the skill name.
+    """
+    agents_md_path = repo_root / "AGENTS.md"
+    agents_md = agents_md_path.read_text(encoding="utf-8") if agents_md_path.exists() else ""
+
+    skills_dir = repo_root / ".agents" / "skills"
+    skill_parts: list[str] = []
+    if skills_dir.exists():
+        for skill_file in sorted(skills_dir.glob("*/SKILL.md")):
+            skill_name = skill_file.parent.name
+            content = skill_file.read_text(encoding="utf-8")
+            skill_parts.append(f"=== SKILL: {skill_name} ===\n{content}")
+    coding_standards = "\n\n".join(skill_parts)
+
+    return agents_md, coding_standards
+
+
 class TaskStatusChanged(Message):
     """Posted when a task's status or phase changes."""
     def __init__(self, task_id: str, phase: "TaskPhase | None", status: str, reason: str = "") -> None:
@@ -89,6 +112,13 @@ class AgentWorker:
                 "openhands_model": task.openhands_model,
             }
 
+            # Inject guidance docs for planning phases (1-3)
+            if phase in (TaskPhase.PLAN, TaskPhase.JANK, TaskPhase.REFINE):
+                _repo_root = Path(__file__).parent.parent.parent
+                _agents_md, _coding_standards = _load_guidance_docs(_repo_root)
+                shared_overrides["agents_md"] = _agents_md
+                shared_overrides["coding_standards"] = _coding_standards
+
             log_path = LOGS_DIR / f"{self._slug}.jsonl"
             log_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -103,6 +133,15 @@ class AgentWorker:
                         shared_overrides=s,
                     ),
                 )
+
+                # Extract and persist cumulative token usage for this phase
+                _conv = result.get("_conv") if isinstance(result, dict) else None
+                if _conv is not None:
+                    _total_tokens = (
+                        getattr(_conv, "input_tokens", 0)
+                        + getattr(_conv, "output_tokens", 0)
+                    )
+                    task.phase_token_counts[agent_id] = _total_tokens
             except Exception as exc:
                 tb = traceback.format_exc()
                 self._post(LogLine(task.task_id, f"[ERROR] Phase {phase}: {exc}\n{tb}"))
