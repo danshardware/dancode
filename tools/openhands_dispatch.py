@@ -52,6 +52,13 @@ def openhands_dispatch(
     env["LLM_MODEL"] = litellm_model
     # --override-with-envs requires LLM_API_KEY; Bedrock uses IAM auth, so any value works
     env.setdefault("LLM_API_KEY", "bedrock")
+    # Prevent any subprocess from opening an interactive pager or editor
+    env["PAGER"] = "cat"
+    env["GIT_PAGER"] = "cat"
+    env["EDITOR"] = "true"
+    env["VISUAL"] = "true"
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["DEBIAN_FRONTEND"] = "noninteractive"
 
     cmd = [
         "openhands",

@@ -56,43 +56,43 @@ def _base_overrides(repo: str, feature: str, openhands_model: str) -> dict:
 
 
 def _parse_schedule_by_track(repo: str, feature: str) -> dict[str, list[dict]]:
-    """Parse SCHEDULE.md and return tasks grouped by track name.
+    """Discover dispatch tasks by scanning the dispatch directory directly.
 
-    Looks for SCHEDULE.md in the main repo first, then in per-track worktrees.
-    Dispatch file paths in the returned dict are absolute paths pointing to
-    whichever location the SCHEDULE.md was found in.
+    Scans <repo>/Planning/<feature>/dispatch/<track>/<task-id>-*.md files
+    and groups them by track subdirectory.  Falls back to scanning per-track
+    worktrees if the dispatch dir only exists there.
     """
     from collections import OrderedDict
     tracks: dict[str, list[dict]] = OrderedDict()
-    seen_tasks: set[str] = set()
 
-    # Candidate SCHEDULE.md locations: main repo + all track worktrees
-    candidates = [Path(repo) / "Planning" / feature / "dispatch" / "SCHEDULE.md"]
+    # Candidate dispatch root dirs: main repo + all track worktrees
+    candidates: list[Path] = []
+    main_dispatch = Path(repo) / "Planning" / feature / "dispatch"
+    if main_dispatch.exists():
+        candidates.append(main_dispatch)
     worktrees_dir = Path(repo).parent / f"{feature}-worktrees"
     if worktrees_dir.exists():
         candidates += sorted(
-            worktrees_dir.glob(f"*/Planning/{feature}/dispatch/SCHEDULE.md")
+            worktrees_dir.glob(f"*/Planning/{feature}/dispatch")
         )
 
-    for schedule_file in candidates:
-        if not schedule_file.exists():
-            continue
-        # root is the repo/worktree root containing this SCHEDULE.md
-        root = schedule_file.parent.parent.parent.parent
-        content = schedule_file.read_text()
-        for m in re.finditer(r"-\s+Task\s+([\w-]+):\s+(dispatch/[\w./-]+)", content):
-            task_id = m.group(1)
-            if task_id in seen_tasks:
+    seen_tasks: set[str] = set()
+    for dispatch_root in candidates:
+        # Each subdirectory is a track (skip SCHEDULE.md at root level)
+        for track_dir in sorted(dispatch_root.iterdir()):
+            if not track_dir.is_dir():
                 continue
-            seen_tasks.add(task_id)
-            rel_path = m.group(2)           # e.g. "dispatch/track-a/001-foo.md"
-            abs_dispatch = str(root / "Planning" / feature / rel_path)
-            parts = rel_path.split("/")
-            track_name = parts[1] if len(parts) >= 3 else "track-a"
-            tracks.setdefault(track_name, []).append({
-                "task_id": task_id,
-                "dispatch_file": abs_dispatch,
-            })
+            track_name = track_dir.name
+            for md_file in sorted(track_dir.glob("*.md")):
+                # Filename starts with task-id: e.g. 001-foo-dispatch.md
+                task_id = md_file.name.split("-")[0]
+                if task_id in seen_tasks:
+                    continue
+                seen_tasks.add(task_id)
+                tracks.setdefault(track_name, []).append({
+                    "task_id": task_id,
+                    "dispatch_file": str(md_file),
+                })
     return tracks
 
 
@@ -103,19 +103,65 @@ def _ensure_track_worktree(repo: str, feature: str, track_name: str) -> str:
     Dest:   <repo>/../<feature>-worktrees/<track_name>/
     """
     branch = f"{feature}-{track_name}"
-    result = subprocess.run(
-        ["git", "worktree", "list", "--porcelain"],
-        cwd=repo, capture_output=True, text=True,
-    )
-    current = None
-    for line in result.stdout.splitlines():
-        if line.startswith("worktree "):
-            current = line[9:]
-        elif line.startswith("branch ") and line[7:].removeprefix("refs/heads/") == branch:
-            return current  # already checked out — return existing path
+    dest = Path(repo).parent / f"{feature}-worktrees" / track_name
+
+    def _find_in_worktree_list(cwd: str) -> str:
+        """Return worktree path if dest or branch is already registered."""
+        result = subprocess.run(
+            ["git", "worktree", "list", "--porcelain"],
+            cwd=cwd, capture_output=True, text=True,
+        )
+        current = ""
+        for line in result.stdout.splitlines():
+            if line.startswith("worktree "):
+                current = line[9:]
+            elif line.startswith("branch ") and line[7:].removeprefix("refs/heads/") == branch:
+                return current
+        # Also match by path in case the worktree is on a different branch
+        result2 = subprocess.run(
+            ["git", "worktree", "list"],
+            cwd=cwd, capture_output=True, text=True,
+        )
+        for line in result2.stdout.splitlines():
+            wt_path = line.split()[0]
+            if Path(wt_path).resolve() == dest.resolve():
+                return wt_path
+        return ""
+
+    existing = _find_in_worktree_list(repo)
+    if existing:
+        return existing
 
     dest = Path(repo).parent / f"{feature}-worktrees" / track_name
     dest.parent.mkdir(parents=True, exist_ok=True)
+
+    # If the directory already exists but wasn't found in `git worktree list`
+    # (e.g. git's index is stale), try to repair or prune and retry.
+    if dest.exists():
+        subprocess.run(["git", "worktree", "prune"], cwd=repo, capture_output=True)
+        # Check again after prune
+        result2 = subprocess.run(
+            ["git", "worktree", "list", "--porcelain"],
+            cwd=repo, capture_output=True, text=True,
+        )
+        current2 = ""
+        for line in result2.stdout.splitlines():
+            if line.startswith("worktree "):
+                current2 = line[9:]
+            elif line.startswith("branch ") and line[7:].removeprefix("refs/heads/") == branch:
+                return current2
+        # Directory exists but git doesn't know about it — register it
+        r = subprocess.run(
+            ["git", "worktree", "add", "--force", str(dest), branch],
+            cwd=repo, capture_output=True, text=True,
+        )
+        if r.returncode == 0:
+            return str(dest)
+        # If that also fails, just use the existing directory as-is (branch is already there)
+        if (dest / ".git").exists() or (dest / "HEAD").exists():
+            return str(dest)
+        raise RuntimeError(f"git worktree add failed: {r.stderr.strip()}")
+
     rc = subprocess.run(["git", "rev-parse", "--verify", branch],
                         cwd=repo, capture_output=True).returncode
     if rc == 0:
@@ -154,6 +200,14 @@ def _run_openhands(worktree: str, model_id: str,
     env = os.environ.copy()
     env["LLM_MODEL"] = litellm_model
     env.setdefault("LLM_API_KEY", "bedrock")
+    # Prevent subprocesses from opening interactive pagers or editors
+    env["PAGER"] = "cat"
+    env["GIT_PAGER"] = "cat"
+    env["EDITOR"] = "true"
+    env["VISUAL"] = "true"
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["DEBIAN_FRONTEND"] = "noninteractive"
+    env["OPENHANDS_SUPPRESS_BANNER"] = "1"
 
     cmd = ["openhands", "--headless", "--json", "--always-approve",
            "--override-with-envs", "-f", dispatch_path]
@@ -303,70 +357,112 @@ def run_phase5(repo: str, feature: str, openhands_model: str,
                 except ValueError:
                     wt_dispatch_file = disp  # fallback: use as-is
 
-            verdict = ""
-            for attempt in range(max_qa_retries + 1):
-                retry_label = f" (retry {attempt}/{max_qa_retries})" if attempt else ""
+            # ── Code (once, or re-run on explicit FAIL) ─────────────────
+            raw_dispatch = Path(dispatch_file).read_text()
 
-                # ── Code ────────────────────────────────────────────────────
-                print(f"  [phase 5] [{task_id}] coding{retry_label}…")
-                # Read dispatch content and prepend branch-safety override so
-                # OpenHands does NOT create or switch branches.
-                raw_dispatch = Path(dispatch_file).read_text()
-                safe_dispatch = (
-                    "CRITICAL OVERRIDE: You are working inside a git worktree.\n"
-                    "Do NOT run 'git checkout', 'git switch', or 'git branch' to "
-                    "create or switch branches.\n"
-                    "Work directly on the current branch for ALL commits.\n"
-                    "Ignore any numbered step that says to create or check out a "
-                    "branch named FEATURE/... — replace it with: commit directly "
-                    "to the current branch.\n\n"
-                    + raw_dispatch
-                )
-                _run_openhands(worktree, openhands_model, dispatch_content=safe_dispatch)
-                committed = _git_commit(worktree, f"task {task_id}: code attempt {attempt + 1}")
-                if committed:
-                    print(f"  [phase 5] [{task_id}] committed code changes")
+            # Strip the branch-creation step ("1. Create a git branch named ...
+            # If the branch already exists, check it out.") from the dispatch
+            # file — we are already on the correct worktree branch.
+            cleaned_dispatch = re.sub(
+                r"\n?1\.\s+Create a git branch named[^\n]+\n"
+                r"(?:\s+If the branch[^\n]+\n)?",
+                "",
+                raw_dispatch,
+            )
 
-                # ── QA ──────────────────────────────────────────────────────
-                print(f"  [phase 5] [{task_id}] QA review{retry_label}…")
-                # Show all code changes since main, listing only code dirs
-                # (exclusion pathspecs are unreliable across git versions)
-                diff_cmd = (
-                    "git diff $(git merge-base HEAD main 2>/dev/null "
-                    "|| git rev-parse HEAD~5) HEAD "
+            safe_dispatch = (
+                "CONTEXT: You are running inside a dedicated git worktree for "
+                "a single coding task. The worktree is already on the correct "
+                "branch for this task.\n"
+                "\n"
+                "HARD CONSTRAINTS — you MUST follow these at all times:\n"
+                "• Do NOT run git branch, git checkout, git switch, git worktree, "
+                "or any command that creates or changes branches.\n"
+                "• Commit changes directly to the current branch (no branch switching).\n"
+                "• Do NOT concern yourself with changes from other tasks — focus "
+                "only on the single task described below.\n"
+                "• Do NOT add, remove, or modify files outside the scope of this task.\n"
+                "\n"
+                + cleaned_dispatch
+            )
+
+            def _build_qa_prompt(qa_attempt: int, baseline_sha: str) -> str:
+                task_diff_cmd = (
+                    f"git diff {baseline_sha}..HEAD "
                     "-- dancode/ tests/ flows/ tools/ engine/ agents/"
                 )
-                qa_prompt = (
-                    f"Review the code changes in this repository for task {task_id}.\n"
+                return (
+                    f"CONTEXT: You are reviewing ONLY the changes introduced by "
+                    f"task {task_id} in this worktree. Other tasks' commits may "
+                    f"exist in the history — ignore them.\n"
+                    f"\n"
+                    f"Review the code changes for task {task_id}.\n"
                     f"1. Run: git log --oneline -10\n"
-                    f"2. Run: {diff_cmd}\n"
-                    f"   (shows all code changes since branching from main)\n"
+                    f"2. Run: {task_diff_cmd}\n"
+                    f"   (shows ONLY this task's changes since commit {baseline_sha[:12]})\n"
                     f"3. Read the task spec at: {wt_dispatch_file}\n"
                     f"4. Write your complete review to this exact absolute path:\n"
                     f"   {wt_review}\n"
                     f"   (create parent directories if needed)\n"
-                    f"End the review file with EXACTLY ONE of:\n"
+                    f"End the review file with EXACTLY ONE of these lines as the LAST line of the file:\n"
                     f"VERDICT: PASS\n"
                     f"VERDICT: PASS WITH NOTES\n"
                     f"VERDICT: FAIL\n"
                     f"(If FAIL, list each blocking issue starting with '- ')\n"
+                    + (f"\nIMPORTANT: Previous attempt {qa_attempt} produced no verdict line. "
+                       "The VERY LAST line of the file must be one of the three VERDICT lines above.\n"
+                       if qa_attempt > 0 else "")
                 )
-                _run_openhands(worktree, openhands_model, dispatch_content=qa_prompt)
-                committed = _git_commit(worktree, f"task {task_id}: QA review attempt {attempt + 1}")
+
+            verdict = ""
+            code_attempt = 0
+            for code_attempt in range(max_qa_retries + 1):
+                code_label = f" (retry {code_attempt}/{max_qa_retries})" if code_attempt else ""
+
+                # Record the HEAD commit before coding so QA can diff only this task
+                baseline_result = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=worktree, capture_output=True, text=True
+                )
+                baseline_sha = baseline_result.stdout.strip() or "HEAD~99"
+
+                print(f"  [phase 5] [{task_id}] coding{code_label}…")
+                _run_openhands(worktree, openhands_model, dispatch_content=safe_dispatch)
+                committed = _git_commit(worktree, f"task {task_id}: code attempt {code_attempt + 1}")
                 if committed:
-                    print(f"  [phase 5] [{task_id}] committed QA review")
+                    print(f"  [phase 5] [{task_id}] committed code changes")
 
-                # OpenHands writes review to wt_review (worktree path);
-                # sync to main_review so _check_qa_results can find it.
-                if wt_review.exists() and wt_review.stat().st_size:
-                    main_review.parent.mkdir(parents=True, exist_ok=True)
-                    main_review.write_text(wt_review.read_text())
+                # ── QA: retry QA-only up to max_qa_retries before re-coding ─
+                for qa_attempt in range(max_qa_retries + 1):
+                    qa_label = f" (qa-retry {qa_attempt}/{max_qa_retries})" if qa_attempt else ""
+                    print(f"  [phase 5] [{task_id}] QA review{code_label}{qa_label}…")
+                    _run_openhands(worktree, openhands_model,
+                                   dispatch_content=_build_qa_prompt(qa_attempt, baseline_sha))
+                    committed = _git_commit(
+                        worktree,
+                        f"task {task_id}: QA review attempt {code_attempt + 1}.{qa_attempt + 1}"
+                    )
+                    if committed:
+                        print(f"  [phase 5] [{task_id}] committed QA review")
 
-                verdict = _get_verdict(main_review) or _get_verdict(wt_review)
+                    if wt_review.exists() and wt_review.stat().st_size:
+                        main_review.parent.mkdir(parents=True, exist_ok=True)
+                        main_review.write_text(wt_review.read_text())
+
+                    verdict = _get_verdict(main_review) or _get_verdict(wt_review)
+                    if verdict == "PASS":
+                        break
+                    if verdict == "" and qa_attempt < max_qa_retries:
+                        # No verdict at all — retry just the QA step
+                        print(f"  [phase 5] [{task_id}] QA no verdict — retrying QA only…")
+                        continue
+                    # FAIL or exhausted QA retries → break to outer loop
+                    break
+
                 if verdict == "PASS":
                     break
-                if attempt < max_qa_retries:
-                    print(f"  [phase 5] [{task_id}] QA {verdict or 'no verdict'} — retrying…")
+                if code_attempt < max_qa_retries:
+                    print(f"  [phase 5] [{task_id}] QA {verdict or 'no verdict after retries'} — re-coding…")
 
             # ── Ensure review is synced to main repo ──────────────────────
             if wt_review.exists() and wt_review.stat().st_size:
