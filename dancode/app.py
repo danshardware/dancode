@@ -21,11 +21,13 @@ from dancode.config import (
 )
 from dancode.widgets.feedback_modal import FeedbackModal, FeedbackSubmitted
 from dancode.widgets.new_feature_modal import NewFeatureModal, NewFeatureRequested
+from dancode.widgets.restart_modal import RestartModal, RestartOptions
 from dancode.widgets.task_detail import (
     ApproveGate,
     CancelTask,
     OpenFeedbackModal,
     PauseResumeTask,
+    RestartTask,
     TaskDetailWidget,
     ViewDiff,
 )
@@ -60,6 +62,7 @@ class DancodeApp(App):
         Binding("n", "new_feature", "New Feature"),
         Binding("q", "quit", "Quit"),
         Binding("?", "help", "Help"),
+        Binding("r", "restart_selected", "Restart"),
     ]
 
     def __init__(
@@ -117,6 +120,7 @@ class DancodeApp(App):
             "  v        — View diff\n"
             "  a        — Approve gate\n"
             "  x        — Cancel task\n"
+            "  r        — Restart selected task\n"
         )
         from textual.widgets import RichLog
         try:
@@ -124,6 +128,21 @@ class DancodeApp(App):
             log.write(help_lines)
         except Exception:
             self.notify(help_lines, title="Help")
+
+    def action_restart_selected(self) -> None:
+        """Open restart modal for the currently selected task (keyboard shortcut)."""
+        if not self._selected_task_id:
+            return
+        task = self._config.get_task(self._selected_task_id)
+        if task and task.status in (TaskStatus.DONE, TaskStatus.CANCELLED):
+            self.push_screen(
+                RestartModal(
+                    task_id=task.task_id,
+                    feature_name=task.feature_name,
+                    current_phase=task.phase.value,
+                    feature_description=task.feature_description,
+                )
+            )
 
     # ------------------------------------------------------------------ Worker management
 
