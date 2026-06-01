@@ -5,14 +5,53 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.message import Message
 from textual.widget import Widget
-from textual.widgets import Button, Label, RichLog
+from textual.widgets import Button, Label, RichLog, Static
 
 from dancode.config import (
     FeatureTask,
+    PHASE_AGENTS,
     TaskPhase,
     TaskStatus,
     PHASE_NAMES,
 )
+
+
+_STATUS_ICONS = {
+    "done": "[green]✓[/green]",
+    "running": "[bold cyan]▶[/bold cyan]",
+    "waiting": "[yellow]⏸[/yellow]",
+    "blocked": "[red]✗[/red]",
+    "cancelled": "[dim]✗[/dim]",
+    "pending": "[dim] [/dim]",
+}
+
+
+def _render_phase_table(task: FeatureTask) -> str:
+    """Return Rich-markup string of all 10 phases with status and token counts."""
+    lines: list[str] = []
+    for phase in TaskPhase:
+        agent_id = PHASE_AGENTS[phase]
+        tokens = task.phase_token_counts.get(agent_id)
+        tok_str = f"{tokens:,} tok" if tokens is not None else "—"
+
+        if phase < task.phase:
+            icon = _STATUS_ICONS["done"]
+            name_style = "[dim]"
+            name_end = "[/dim]"
+        elif phase == task.phase:
+            icon = _STATUS_ICONS.get(task.status.value, _STATUS_ICONS["pending"])
+            name_style = "[bold]"
+            name_end = "[/bold]"
+        else:
+            icon = _STATUS_ICONS["pending"]
+            name_style = "[dim]"
+            name_end = "[/dim]"
+
+        lines.append(
+            f" {icon}  {phase.value:>2}  {name_style}{PHASE_NAMES[phase]:<18}{name_end}"
+            f"  [dim]{tok_str}[/dim]"
+        )
+    return "\n".join(lines)
 
 
 class ApproveGate(Message):
@@ -65,10 +104,9 @@ class TaskDetailWidget(Widget):
         height: 1fr;
         padding: 0 1;
     }
-    TaskDetailWidget #phase-breadcrumb {
-        height: 1;
+    TaskDetailWidget #phase-table {
+        height: auto;
         margin-bottom: 1;
-        color: $text-muted;
     }
     TaskDetailWidget #task-title {
         text-style: bold;
@@ -99,7 +137,7 @@ class TaskDetailWidget(Widget):
 
     def compose(self) -> ComposeResult:
         yield Label("", id="task-title")
-        yield Label("", id="phase-breadcrumb")
+        yield Static("", id="phase-table", markup=True)
         yield RichLog(id="log", highlight=True, markup=True, wrap=True, max_lines=200)
         yield Label("", id="blocked-reason")
         yield Widget(id="actions")
@@ -127,17 +165,8 @@ class TaskDetailWidget(Widget):
         title = self.query_one("#task-title", Label)
         title.update(f"[bold]{task.feature_name}[/bold]  [{task.status}]")
 
-        breadcrumb = self.query_one("#phase-breadcrumb", Label)
-        parts = []
-        for phase in TaskPhase:
-            name = PHASE_NAMES[phase]
-            if phase == task.phase:
-                parts.append(f"[bold reverse] {phase}: {name} [/]")
-            elif phase < task.phase:
-                parts.append(f"[dim] {phase}: {name} [/]")
-            else:
-                parts.append(f" {phase}: {name} ")
-        breadcrumb.update(" → ".join(parts))
+        phase_table = self.query_one("#phase-table", Static)
+        phase_table.update(_render_phase_table(task))
 
         blocked = self.query_one("#blocked-reason", Label)
         if task.status == TaskStatus.BLOCKED and task.blocked_reason:
