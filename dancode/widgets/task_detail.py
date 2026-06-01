@@ -5,7 +5,8 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.message import Message
 from textual.widget import Widget
-from textual.widgets import Button, Label, RichLog, Static
+from textual.binding import Binding
+from textual.widgets import Button, Label, RichLog, Static, TextArea
 
 from dancode.config import (
     FeatureTask,
@@ -89,6 +90,15 @@ class OpenFeedbackModal(Message):
         self.task_id = task_id
 
 
+
+class InlineReplySubmitted(Message):
+    """User submitted a reply via the inline reply box (WAITING state)."""
+    def __init__(self, task_id: str, reply: str) -> None:
+        super().__init__()
+        self.task_id = task_id
+        self.reply = reply
+
+
 class ViewDiff(Message):
     """User wants to see the git diff for this task."""
     def __init__(self, task_id: str) -> None:
@@ -129,39 +139,103 @@ class TaskDetailWidget(Widget):
         color: red;
         margin-top: 1;
     }
+    TaskDetailWidget #reply-box {
+        height: auto;
+        margin-top: 1;
+        border: solid $warning;
+        padding: 0 1;
+    }
+    TaskDetailWidget #reply-box Label {
+        color: $warning;
+        margin-bottom: 1;
+    }
+    TaskDetailWidget #reply-area {
+        height: 5;
+        margin-bottom: 1;
+    }
     """
+
+    BINDINGS = [
+        Binding("ctrl+s", "submit_reply", "Submit reply", show=False),
+    ]
 
     def __init__(self, **kwargs) -> None:  # type: ignore[override]
         super().__init__(**kwargs)
-        self._task: FeatureTask | None = None
+        self._current_feature: FeatureTask | None = None
 
     def compose(self) -> ComposeResult:
+        from textual.containers import Container
         yield Label("", id="task-title")
         yield Static("", id="phase-table", markup=True)
         yield RichLog(id="log", highlight=True, markup=True, wrap=True, max_lines=200)
+        with Container(id="reply-box"):
+            yield Label("[bold]Agent is waiting for your reply:[/bold]")
+            yield TextArea(id="reply-area")
+            yield Button("Submit reply [Ctrl+S]", id="btn-reply-submit", variant="warning")
         yield Label("", id="blocked-reason")
         yield Widget(id="actions")
 
     def show_task(self, task: FeatureTask) -> None:
         """Display a (new) task in the detail panel."""
-        self._task = task
+        self._current_feature = task
         self._refresh_header()
+        self._refresh_reply_box()
         self._refresh_actions()
 
     def update_task(self, task: FeatureTask) -> None:
         """Update an already-displayed task (status/phase changed)."""
-        self._task = task
+        self._current_feature = task
         self._refresh_header()
+        self._refresh_reply_box()
         self._refresh_actions()
 
     def append_log(self, line: str) -> None:
         log = self.query_one("#log", RichLog)
         log.write(line)
 
-    def _refresh_header(self) -> None:
-        if not self._task:
+    def _refresh_reply_box(self) -> None:
+        if not self._current_feature:
             return
-        task = self._task
+        waiting = (
+            self._current_feature.status == TaskStatus.WAITING
+            and bool(self._current_feature.pending_checkpoint)
+        )
+        reply_box = self.query_one("#reply-box")
+        reply_box.display = waiting
+        if waiting:
+            questions = self._current_feature.pending_questions
+            if not questions and self._current_feature.pending_checkpoint:
+                # Recover questions from checkpoint for sessions saved before
+                # pending_questions was introduced
+                try:
+                    from engine.state import load_checkpoint
+                    cp = load_checkpoint(self._current_feature.pending_checkpoint)
+                    action_input = cp.get("action_input", {})
+                    if isinstance(action_input, dict):
+                        questions = (
+                            action_input.get("questions")
+                            or action_input.get("message")
+                            or ""
+                        )
+                    else:
+                        questions = str(action_input) if action_input else ""
+                    if questions:
+                        self._current_feature.pending_questions = questions
+                except Exception:
+                    pass
+            if questions:
+                log = self.query_one("#log", RichLog)
+                log.clear()
+                log.write(
+                    f"[yellow]Agent is waiting for your reply:[/yellow]\n\n"
+                    f"{questions}"
+                )
+            self.query_one("#reply-area", TextArea).focus()
+
+    def _refresh_header(self) -> None:
+        if not self._current_feature:
+            return
+        task = self._current_feature
         title = self.query_one("#task-title", Label)
         title.update(f"[bold]{task.feature_name}[/bold]  [{task.status}]")
 
@@ -175,9 +249,9 @@ class TaskDetailWidget(Widget):
             blocked.update("")
 
     def _refresh_actions(self) -> None:
-        if not self._task:
+        if not self._current_feature:
             return
-        task = self._task
+        task = self._current_feature
         actions = self.query_one("#actions", Widget)
         # Remove existing buttons
         for btn in list(actions.query(Button)):
@@ -187,7 +261,7 @@ class TaskDetailWidget(Widget):
         if task.status in (TaskStatus.RUNNING, TaskStatus.WAITING):
             actions.mount(Button("[p] Pause/Resume", id="btn-pause", variant="default"))
 
-        # Feedback (only when running)
+        # Feedback (only when running, not waiting — waiting uses inline box)
         if task.status == TaskStatus.RUNNING:
             actions.mount(Button("[f] Feedback", id="btn-feedback", variant="primary"))
 
@@ -195,22 +269,17 @@ class TaskDetailWidget(Widget):
         if task.worktree_path:
             actions.mount(Button("[v] Diff", id="btn-diff", variant="default"))
 
-        # Approve gate (only when waiting)
-        if task.status == TaskStatus.WAITING:
-            actions.mount(Button("[a] Approve", id="btn-approve", variant="success"))
-
         # Cancel (not done/cancelled)
         if task.status not in (TaskStatus.DONE, TaskStatus.CANCELLED):
             actions.mount(Button("[x] Cancel", id="btn-cancel", variant="error"))
 
-        # Restart (only when done or cancelled)
-        if task.status in (TaskStatus.DONE, TaskStatus.CANCELLED):
-            actions.mount(Button("[r] Restart", id="btn-restart", variant="warning"))
+        # Restart (always available)
+        actions.mount(Button("[r] Restart", id="btn-restart", variant="warning"))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if not self._task:
+        if not self._current_feature:
             return
-        task_id = self._task.task_id
+        task_id = self._current_feature.task_id
         btn_id = event.button.id
         if btn_id == "btn-pause":
             self.post_message(PauseResumeTask(task_id))
@@ -218,9 +287,19 @@ class TaskDetailWidget(Widget):
             self.post_message(OpenFeedbackModal(task_id))
         elif btn_id == "btn-diff":
             self.post_message(ViewDiff(task_id))
-        elif btn_id == "btn-approve":
-            self.post_message(ApproveGate(task_id))
+        elif btn_id == "btn-reply-submit":
+            self.action_submit_reply()
         elif btn_id == "btn-cancel":
             self.post_message(CancelTask(task_id))
         elif btn_id == "btn-restart":
             self.post_message(RestartTask(task_id))
+
+    def action_submit_reply(self) -> None:
+        """Submit the inline reply to the waiting agent."""
+        if not self._current_feature:
+            return
+        reply = self.query_one("#reply-area", TextArea).text.strip()
+        if not reply:
+            return
+        self.post_message(InlineReplySubmitted(self._current_feature.task_id, reply))
+        self.query_one("#reply-area", TextArea).clear()

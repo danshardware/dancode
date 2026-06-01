@@ -74,6 +74,10 @@ blocks:
       After listing all risks, apply every FIX directly to the relevant plan files using
       replace_in_file or write_file.
 
+      When ALL fixes have been written to disk, you MUST emit `action: done` immediately.
+      Do NOT write a summary. Do NOT explain what you did. Simply emit done.
+      Any response that is not a tool call or `action: done` will loop — avoid it.
+
       Start by listing files, then read them, then audit.
 
       Respond ONLY with valid YAML:

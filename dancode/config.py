@@ -77,6 +77,9 @@ class FeatureTask(BaseModel):
     session_ids: dict[str, str] = Field(default_factory=dict)  # phase_name → session_id
     blocked_reason: Optional[str] = None
     phase_token_counts: dict[str, int] = Field(default_factory=dict)
+    pending_checkpoint: Optional[str] = None  # checkpoint path when waiting for human reply
+    pending_reply: Optional[str] = None       # queued feedback text to inject on resume
+    pending_questions: Optional[str] = None   # agent's questions to display on app restart
 
 
 class ProjectConfig(BaseModel):

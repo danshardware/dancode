@@ -27,6 +27,7 @@ from dancode.widgets.restart_modal import RestartModal, RestartOptions
 from dancode.widgets.task_detail import (
     ApproveGate,
     CancelTask,
+    InlineReplySubmitted,
     OpenFeedbackModal,
     PauseResumeTask,
     RestartTask,
@@ -136,7 +137,7 @@ class DancodeApp(App):
         if not self._selected_task_id:
             return
         task = self._config.get_task(self._selected_task_id)
-        if task and task.status in (TaskStatus.DONE, TaskStatus.CANCELLED):
+        if task:
             self.push_screen(
                 RestartModal(
                     task_id=task.task_id,
@@ -172,7 +173,8 @@ class DancodeApp(App):
         if exc:
             import traceback
             tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
-            self.call_from_thread(
+            # Done callbacks run in the event loop thread, so use call_later
+            self.call_later(
                 self.notify,
                 f"{type(exc).__name__}: {exc}\n\n{tb[:500]}",
                 title=f"Worker crashed [{task_id}]",
@@ -181,8 +183,13 @@ class DancodeApp(App):
             )
 
     def _post_from_thread(self, message) -> None:  # type: ignore[override]
-        """Thread-safe message post (called from executor threads)."""
-        self.call_from_thread(self.post_message, message)
+        """Thread-safe message post — works from both coroutines and executor threads.
+
+        post_message() already handles both cases internally:
+        - Same thread (event loop / coroutine): puts directly onto the queue
+        - Different thread (executor): uses call_soon_threadsafe
+        """
+        self.post_message(message)
 
     # ------------------------------------------------------------------ Message handlers
 
@@ -275,13 +282,37 @@ class DancodeApp(App):
             self.push_screen(FeedbackModal(task.task_id, task.feature_name))
 
     def on_feedback_submitted(self, event: FeedbackSubmitted) -> None:
-        task = self._config.get_task(event.task_id)
-        if not task or not task.worktree_path:
+        self._handle_reply(event.task_id, event.feedback)
+
+    def on_inline_reply_submitted(self, event: InlineReplySubmitted) -> None:
+        self._handle_reply(event.task_id, event.reply)
+
+    def _handle_reply(self, task_id: str, reply: str) -> None:
+        task = self._config.get_task(task_id)
+        if not task:
+            return
+        # If the task is waiting at a human_reply gate, resume from checkpoint
+        if task.status == TaskStatus.WAITING and task.pending_checkpoint:
+            task.pending_reply = reply
+            task.pending_questions = None
+            task.status = TaskStatus.RUNNING
+            task.blocked_reason = None
+            self._config.upsert_task(task)
+            self._config.save(self._slug)
+            self._agent_workers.pop(task_id, None)
+            self._agent_tasks.pop(task_id, None)
+            self._start_worker(task)
+            tl = self.query_one("#task-list-widget", TaskListWidget)
+            tl.tasks = list(self._config.tasks)
+            self.notify("Reply submitted — resuming agent.", title="Reply")
+            return
+        # Otherwise write steering feedback to the worktree for a running agent
+        if not task.worktree_path:
             self.notify("No worktree found for this task.", severity="warning")
             return
         fb_path = Path(task.worktree_path) / ".dancode-feedback.md"
         try:
-            fb_path.write_text(event.feedback, encoding="utf-8")
+            fb_path.write_text(reply, encoding="utf-8")
             self.notify("Feedback written to worktree.", title="Feedback")
         except OSError as exc:
             self.notify(str(exc), severity="error")

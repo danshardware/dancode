@@ -9,6 +9,11 @@ description: |
 flows:
   main: phase3_refine
 
+# Phases 1-3 receive developer-authored feature descriptions, not external user
+# input. Disable the input_safety guardrail to prevent false positive rejections.
+guardrails:
+  input: ""
+
 max_iterations: 35
 
 model_defaults:

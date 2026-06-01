@@ -110,6 +110,7 @@ class AgentWorker:
                 "feature_description": task.feature_description,
                 "feature_branch": task.feature_branch or f"feature/{task.feature_name}-{task.task_id}",
                 "openhands_model": task.openhands_model,
+                "_tui_mode": True,
             }
 
             # Inject guidance docs for planning phases (1-3)
@@ -122,14 +123,38 @@ class AgentWorker:
             log_path = LOGS_DIR / f"{self._slug}.jsonl"
             log_path.parent.mkdir(parents=True, exist_ok=True)
 
+            # Determine resume parameters if the task was suspended at a human gate
+            _resume_session_id: str | None = None
+            _resume_messages: list | None = None
+            _resume_block: str | None = None
+            if task.pending_checkpoint and task.pending_reply:
+                try:
+                    from engine.state import load_checkpoint
+                    _cp = load_checkpoint(task.pending_checkpoint)
+                    _resume_session_id = _cp.get("session_id")
+                    _resume_messages = list(_cp.get("messages", []))
+                    _resume_block = _cp.get("_suspend_block") or _cp.get("_current_block_id")
+                    shared_overrides["_tui_pending_reply"] = task.pending_reply
+                    task.pending_checkpoint = None
+                    task.pending_reply = None
+                except Exception as exc:
+                    self._post(LogLine(task.task_id, f"[yellow]Could not load checkpoint for resume: {exc}. Restarting phase.[/yellow]"))
+                    task.pending_checkpoint = None
+                    task.pending_reply = None
+
             try:
                 # AgentRunner.run() is synchronous — run in executor
                 loop = asyncio.get_running_loop()
                 runner = AgentRunner(agent_id=agent_id, logs_dir=str(log_path.parent))
                 result = await loop.run_in_executor(
                     None,
-                    lambda r=runner, s=shared_overrides: r.run(
+                    lambda r=runner, s=shared_overrides,
+                           sid=_resume_session_id, msgs=_resume_messages,
+                           rb=_resume_block: r.run(
                         prompt=task.feature_description,
+                        session_id=sid,
+                        prior_messages=msgs,
+                        resume_from_block=rb,
                         shared_overrides=s,
                     ),
                 )
@@ -150,6 +175,33 @@ class AgentWorker:
                 self._post(TaskStatusChanged(task.task_id, phase, "blocked", str(exc)))
                 return
 
+            # Check for input guardrail rejection — block the task instead of advancing
+            if isinstance(result, dict) and result.get("_input_rejected"):
+                reason = "Input guardrail rejected the feature description for this phase."
+                task.status = TaskStatus.BLOCKED
+                task.blocked_reason = reason
+                self._post(TaskStatusChanged(task.task_id, phase, "blocked", reason))
+                self._post(LogLine(task.task_id, f"[red]Phase {phase} blocked: guardrail rejected the input.[/red]"))
+                return
+
+            # Check for a suspended result (human_reply block waiting for input)
+            if isinstance(result, dict) and result.get("suspended"):
+                task.pending_checkpoint = result.get("checkpoint_path")
+                task.status = TaskStatus.WAITING
+                # Show the agent's questions in the log panel
+                action_input = result.get("action_input", {})
+                if isinstance(action_input, dict):
+                    questions = action_input.get("questions") or action_input.get("message") or ""
+                else:
+                    questions = str(action_input) if action_input else ""
+                task.pending_questions = questions or None
+                self._post(TaskStatusChanged(task.task_id, phase, "waiting"))
+                if questions:
+                    self._post(LogLine(task.task_id, f"[yellow]Agent is waiting for your reply:[/yellow]\n\n{questions}"))
+                else:
+                    self._post(LogLine(task.task_id, "[yellow]Agent is waiting for your input. Type your reply below.[/yellow]"))
+                return
+
             # Check for a BLOCKED result via shared state (set by openhands_dispatch)
             openhands_result = result.get("openhands_result", "") if isinstance(result, dict) else ""
             if isinstance(openhands_result, str) and openhands_result.startswith("BLOCKED"):
@@ -158,9 +210,6 @@ class AgentWorker:
                 self._post(TaskStatusChanged(task.task_id, phase, "blocked", openhands_result))
                 return
 
-            # Human gates (phase 2 jank, phase 8 review) emit a "waiting" signal
-            # The runner writes {"type": "human_gate", "phase": N} to the log — the
-            # main app handles re-queuing after the user approves.
             self._post(LogLine(task.task_id, f"Phase {phase} complete."))
 
         if not self._cancelled:

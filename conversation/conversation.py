@@ -289,7 +289,8 @@ class Conversation:
                   system_prompts: str | list[str] = [], 
                   user_prompt: str | None = None, 
                   model_config: dict = {},
-                  tools: list[BedrockTool] | None = None):
+                  tools: list[BedrockTool] | None = None,
+                  max_tool_calls_per_turn: int | None = None):
         """Initialize a Conversation instance.
         
         Parameters:
@@ -306,6 +307,9 @@ class Conversation:
         else :
             self.system_prompts = self.system_prompt(system_prompts)
         
+        if max_tool_calls_per_turn is not None:
+            self._MAX_TOOL_CALLS_PER_TURN = max_tool_calls_per_turn
+
         self.conversation: list[Message] = []
         if not user_prompt is None:
             self.add_conversation_turn("user", user_prompt)

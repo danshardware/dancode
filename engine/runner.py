@@ -63,15 +63,15 @@ def _resolve_guardrail_prompt(
     Return the guardrail prompt to use for `key` ("input" or "output").
 
     Priority:
-    1. agent_config["guardrails"][key] if non-empty
+    1. agent_config["guardrails"][key] if the key is explicitly present
+       (empty string "" means "disabled" — skip the guardrail entirely)
     2. system_defaults["input_safety"] / system_defaults["output_safety"]
     3. "" (empty — caller should skip the guardrail check)
     """
-    agent_override = (
-        agent_config.get("guardrails", {}).get(key, "") or ""
-    ).strip()
-    if agent_override:
-        return agent_override
+    guardrails = agent_config.get("guardrails", {})
+    if key in guardrails:
+        # Explicit override in agent config — honour it even if empty (= disabled)
+        return (guardrails[key] or "").strip()
     fallback_key = "input_safety" if key == "input" else "output_safety"
     return (system_defaults.get(fallback_key, "") or "").strip()
 

@@ -71,7 +71,7 @@ blocks:
       read_file: read_file_block
       write_file: write_file_block
       replace_in_file: replace_in_file_block
-      done: END
+      done: plan_quality_check
       default: refine
 
   list_files_block:
@@ -97,3 +97,13 @@ blocks:
     tool: replace_in_file
     transitions:
       default: refine
+
+  plan_quality_check:
+    type: guardrail
+    model_id: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+    system_prompt: "{{config.guardrails.plan_quality}}"
+    transitions:
+      approved: END
+      warn: END
+      rejected: END
+      default: END

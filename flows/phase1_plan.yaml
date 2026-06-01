@@ -105,6 +105,7 @@ blocks:
       ```
     transitions:
       confirm_tracks: confirm_tracks_gate
+      ask_questions: wait_for_answers
       write_plan: write_plan
       default: draft_tracks
 

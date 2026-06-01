@@ -254,6 +254,7 @@ class LLMBlock(BaseBlock):
         system_prompt = system_prompt.rstrip() + f"\n\n{_SYSTEM_TRUST_ANCHOR}\n"
 
         # Get or create the persistent Conversation object for this session
+        _max_tool_calls: int | None = prep_res.get("agent_config", {}).get("max_tool_calls_per_turn")
         conv: Conversation | None = prep_res.get("_conv")
         if conv is None:
             # First call this session — create fresh and seed from serialized turns
@@ -261,6 +262,7 @@ class LLMBlock(BaseBlock):
                 model_id=self._model_id,
                 system_prompts=system_prompt,
                 tools=self._tools or [],
+                max_tool_calls_per_turn=_max_tool_calls,
             )
             for turn in prep_res.get("_conv_turns", []):
                 content = turn.get("content", [])
@@ -672,12 +674,18 @@ class HumanReplyBlock(BaseBlock):
 
     def prep(self, shared: dict) -> dict:
         self._log(shared, "human_input_requested")
-        return dict(shared)
+        prep_res = dict(shared)
+        prep_res["_current_block_id"] = self.block_id
+        return prep_res
 
     def exec(self, prep_res: dict) -> str:
+        # TUI resume path: reply was pre-supplied by the app
+        if "_tui_pending_reply" in prep_res:
+            return prep_res["_tui_pending_reply"]
+
         action_input = prep_res.get("action_input", {})
         if isinstance(action_input, dict):
-            message = action_input.get("message", "")
+            message = action_input.get("message", "") or action_input.get("questions", "")
         else:
             message = str(action_input)
 
@@ -714,6 +722,19 @@ class HumanReplyBlock(BaseBlock):
             ctx["retry_count"] = 0
             save_checkpoint(prep_res, cp_path)
             raise SuspendExecution(str(cp_path))
+
+        # TUI mode: save checkpoint and suspend instead of blocking on stdin
+        if prep_res.get("_tui_mode"):
+            from engine.state import save_checkpoint, checkpoint_path_for
+            cp_path = checkpoint_path_for(
+                prep_res.get("logs_dir", "logs"),
+                prep_res["agent_id"],
+                prep_res["session_id"],
+            )
+            # Store the suspend block name so the worker can resume from it
+            prep_res["_suspend_block"] = prep_res.get("_current_block_id", self.block_id)
+            save_checkpoint(prep_res, cp_path)
+            raise SuspendExecution(checkpoint_path=str(cp_path))
 
         if message:
             _console.print(f"\n🤖 [bold cyan]Agent:[/bold cyan] {message}")
