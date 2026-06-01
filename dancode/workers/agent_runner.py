@@ -133,6 +133,15 @@ class AgentWorker:
                         shared_overrides=s,
                     ),
                 )
+
+                # Extract and persist cumulative token usage for this phase
+                _conv = result.get("_conv") if isinstance(result, dict) else None
+                if _conv is not None:
+                    _total_tokens = (
+                        getattr(_conv, "input_tokens", 0)
+                        + getattr(_conv, "output_tokens", 0)
+                    )
+                    task.phase_token_counts[agent_id] = _total_tokens
             except Exception as exc:
                 tb = traceback.format_exc()
                 self._post(LogLine(task.task_id, f"[ERROR] Phase {phase}: {exc}\n{tb}"))
