@@ -24,8 +24,10 @@ def _run_git(args: list[str], cwd: str) -> tuple[int, str, str]:
 def git_worktree_create(repo_path: str, branch: str, dest_path: str, context: ToolContext) -> str:
     """Create a new git worktree for a feature branch.
 
-    Creates the branch if it does not exist. dest_path must not already exist.
-    Returns the worktree path on success or [ERROR] on failure.
+    Creates the branch if it does not exist.
+    If the branch is already checked out in another worktree, returns that
+    existing path so the caller can use it directly.
+    Returns the worktree path on success, or [ERROR] on failure.
     """
     repo = Path(repo_path).resolve()
     dest = Path(dest_path).resolve()
@@ -41,7 +43,17 @@ def git_worktree_create(repo_path: str, branch: str, dest_path: str, context: To
         # Branch doesn't exist — create worktree with new branch based on HEAD
         rc, out, err = _run_git(["worktree", "add", "-b", branch, str(dest)], str(repo))
     else:
+        # Branch exists — attempt to add worktree; may fail if branch already checked out
         rc, out, err = _run_git(["worktree", "add", str(dest), branch], str(repo))
+        if rc != 0 and "already checked out" in err:
+            # Branch is live in another worktree; find and return that path
+            _, wt_list, _ = _run_git(["worktree", "list", "--porcelain"], str(repo))
+            wt_path: str | None = None
+            for line in wt_list.splitlines():
+                if line.startswith("worktree "):
+                    wt_path = line[9:]
+                elif line.startswith("branch ") and line[7:].removeprefix("refs/heads/") == branch:
+                    return f"Branch already checked out at: {wt_path}"
 
     if rc != 0:
         return f"[ERROR] git worktree add failed: {err}"

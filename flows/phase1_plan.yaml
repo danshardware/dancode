@@ -13,7 +13,7 @@ blocks:
   gather_context:
     type: llm
     system_prompt: |
-      You are a senior software architect running Phase 1 of the dancode planning loop.
+      You are a senior software architect running Phase 1 of the planning loop.
 
       The user has provided:
       - REPO_PATH: {{state.repo_path}}
@@ -35,6 +35,13 @@ blocks:
       - Are there files/modules that MUST NOT change?
       - What is the definition of "done" from the user's perspective?
 
+      Ensure you know any of the following that are pertinent to the change being asked for:
+      - The specific, EXACT workflow the user wants for the feature. You may and should suggest one, but make sure there is absolute agreement
+      - What is part of the feature and what is out of scope
+      - Ask yourself: What is likely to go wrong here and how do we avoid it?
+      - Know what assumptions you are making and ensure the user knows about them
+      - Identify the assumptions the user is probably making and make sure they fit in with your plan.
+      
       Respond ONLY with valid YAML:
       ```yaml
       reasoning: "your analysis of the feature request"

@@ -13,7 +13,7 @@ blocks:
   read_plan:
     type: llm
     system_prompt: |
-      You are a dispatch generator running Phase 4 of the dancode loop.
+      You are tasked with writing the coding dispatch documents for a software feature.
 
       REPO_PATH: {{state.repo_path}}
       FEATURE_NAME: {{state.feature_name}}
