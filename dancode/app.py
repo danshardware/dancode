@@ -15,17 +15,21 @@ from textual.widgets import Footer, Header, Label
 
 from dancode.config import (
     FeatureTask,
+    PHASE_AGENTS,
     ProjectConfig,
+    TaskPhase,
     TaskStatus,
     LOGS_DIR,
 )
 from dancode.widgets.feedback_modal import FeedbackModal, FeedbackSubmitted
 from dancode.widgets.new_feature_modal import NewFeatureModal, NewFeatureRequested
+from dancode.widgets.restart_modal import RestartModal, RestartOptions
 from dancode.widgets.task_detail import (
     ApproveGate,
     CancelTask,
     OpenFeedbackModal,
     PauseResumeTask,
+    RestartTask,
     TaskDetailWidget,
     ViewDiff,
 )
@@ -60,6 +64,7 @@ class DancodeApp(App):
         Binding("n", "new_feature", "New Feature"),
         Binding("q", "quit", "Quit"),
         Binding("?", "help", "Help"),
+        Binding("r", "restart_selected", "Restart"),
     ]
 
     def __init__(
@@ -117,6 +122,7 @@ class DancodeApp(App):
             "  v        — View diff\n"
             "  a        — Approve gate\n"
             "  x        — Cancel task\n"
+            "  r        — Restart selected task\n"
         )
         from textual.widgets import RichLog
         try:
@@ -124,6 +130,21 @@ class DancodeApp(App):
             log.write(help_lines)
         except Exception:
             self.notify(help_lines, title="Help")
+
+    def action_restart_selected(self) -> None:
+        """Open restart modal for the currently selected task (keyboard shortcut)."""
+        if not self._selected_task_id:
+            return
+        task = self._config.get_task(self._selected_task_id)
+        if task and task.status in (TaskStatus.DONE, TaskStatus.CANCELLED):
+            self.push_screen(
+                RestartModal(
+                    task_id=task.task_id,
+                    feature_name=task.feature_name,
+                    current_phase=task.phase.value,
+                    feature_description=task.feature_description,
+                )
+            )
 
     # ------------------------------------------------------------------ Worker management
 
@@ -343,3 +364,72 @@ class DancodeApp(App):
             detail.append_log("\n--- git diff main...HEAD ---\n" + diff[:5000])
         except Exception:
             pass
+
+    def on_restart_task(self, event: RestartTask) -> None:
+        """Open restart modal when [r] button is pressed in the detail panel."""
+        task = self._config.get_task(event.task_id)
+        if not task:
+            return
+        self.push_screen(
+            RestartModal(
+                task_id=task.task_id,
+                feature_name=task.feature_name,
+                current_phase=task.phase.value,
+                feature_description=task.feature_description,
+            )
+        )
+
+    def on_restart_options(self, event: RestartOptions) -> None:
+        """Apply restart config and launch a new worker."""
+        task = self._config.get_task(event.task_id)
+        if not task:
+            return
+
+        # Cancel existing worker if any
+        worker = self._agent_workers.pop(event.task_id, None)
+        if worker:
+            worker.cancel()
+        asyncio_task = self._agent_tasks.pop(event.task_id, None)
+        if asyncio_task:
+            asyncio_task.cancel()
+
+        # Apply restart configuration
+        task.feature_description = event.steering_text
+        task.phase = TaskPhase(event.restart_phase)
+        task.status = TaskStatus.PENDING
+        task.blocked_reason = None
+
+        if event.clear_history:
+            # Clear session_ids and token counts for phases >= restart_phase
+            phases_to_clear = {
+                agent_id
+                for phase, agent_id in PHASE_AGENTS.items()
+                if phase.value >= event.restart_phase
+            }
+            task.session_ids = {
+                k: v for k, v in task.session_ids.items()
+                if k not in phases_to_clear
+            }
+            task.phase_token_counts = {
+                k: v for k, v in task.phase_token_counts.items()
+                if k not in phases_to_clear
+            }
+
+        self._config.upsert_task(task)
+        self._config.save(self._slug)
+
+        tl = self.query_one("#task-list-widget", TaskListWidget)
+        tl.tasks = list(self._config.tasks)
+
+        if self._selected_task_id == task.task_id:
+            try:
+                detail = self.query_one("#task-detail-widget", TaskDetailWidget)
+                detail.show_task(task)
+            except Exception:
+                pass
+
+        self._start_worker(task)
+        self.notify(
+            f"Restarting {task.feature_name!r} from phase {event.restart_phase}",
+            title="Restart",
+        )

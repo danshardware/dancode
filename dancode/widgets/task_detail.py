@@ -29,6 +29,13 @@ class CancelTask(Message):
         self.task_id = task_id
 
 
+class RestartTask(Message):
+    """User clicked Restart on a cancelled or done task."""
+    def __init__(self, task_id: str) -> None:
+        super().__init__()
+        self.task_id = task_id
+
+
 class PauseResumeTask(Message):
     """User clicked Pause/Resume."""
     def __init__(self, task_id: str) -> None:
@@ -167,6 +174,10 @@ class TaskDetailWidget(Widget):
         if task.status not in (TaskStatus.DONE, TaskStatus.CANCELLED):
             actions.mount(Button("[x] Cancel", id="btn-cancel", variant="error"))
 
+        # Restart (only when done or cancelled)
+        if task.status in (TaskStatus.DONE, TaskStatus.CANCELLED):
+            actions.mount(Button("[r] Restart", id="btn-restart", variant="warning"))
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if not self._task:
             return
@@ -182,3 +193,5 @@ class TaskDetailWidget(Widget):
             self.post_message(ApproveGate(task_id))
         elif btn_id == "btn-cancel":
             self.post_message(CancelTask(task_id))
+        elif btn_id == "btn-restart":
+            self.post_message(RestartTask(task_id))
