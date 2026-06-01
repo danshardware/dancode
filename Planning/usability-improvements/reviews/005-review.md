@@ -50,6 +50,8 @@ The task spec explicitly requires these handlers in app.py, but they are NOT pre
    - Required code is ~60 lines that: cancels existing worker, resets task state, clears history, persists, and starts new worker
    - See spec lines 150-208 for full implementation
 
+3. **Missing test file**: The task spec requires `tests/unit/test_restart_wiring.py` but it does not exist.
+
 ### Functional Analysis
 
 The current implementation is broken:
@@ -72,5 +74,6 @@ This is a **FAIL** - the core restart functionality is incomplete and non-functi
 
 - Missing `on_restart_task` handler in app.py to respond to RestartTask messages
 - Missing `on_restart_options` handler in app.py to process RestartOptions and restart the task
+- Missing test file `tests/unit/test_restart_wiring.py`
 
 VERDICT: FAIL
