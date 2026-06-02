@@ -45,7 +45,7 @@ _STATUS_ICONS: dict[str, str]          # adds "paused" → "[magenta]⏸[/magent
 
 ### Step 1 — Update `_STATUS_STYLE` in `task_list.py`
 
-Find:
+`dancode/widgets/task_list.py` — Find:
 ```python
 _STATUS_STYLE = {
     TaskStatus.RUNNING:   "bold green",
@@ -64,7 +64,7 @@ Add one entry after `TaskStatus.WAITING`:
 
 ### Step 2 — Update `_STATUS_SYMBOL` in `task_list.py`
 
-Find:
+`dancode/widgets/task_list.py` — Find:
 ```python
 _STATUS_SYMBOL = {
     TaskStatus.RUNNING:   "▶",
@@ -83,7 +83,7 @@ Add one entry after `TaskStatus.WAITING`:
 
 ### Step 3 — Update `_STATUS_ICONS` in `task_detail.py`
 
-Find:
+`dancode/widgets/task_detail.py` — Find:
 ```python
 _STATUS_ICONS = {
     "done": "[green]✓[/green]",
@@ -104,13 +104,11 @@ Add one entry after `"waiting"`:
 
 ## Acceptance Criteria
 
-- `_STATUS_STYLE[TaskStatus.PAUSED] == "bold magenta"`.
-- `_STATUS_SYMBOL[TaskStatus.PAUSED] == "⏸"`.
-- `_STATUS_ICONS["paused"] == "[magenta]⏸[/magenta]"`.
-- `_make_item(task)` in `task_list.py` does not raise for a task with
-  `status=TaskStatus.PAUSED`.
-- `_render_phase_table(task)` in `task_detail.py` does not raise for a task with
-  `status=TaskStatus.PAUSED`.
+- `assert _STATUS_STYLE[TaskStatus.PAUSED] == "bold magenta"`.
+- `assert _STATUS_SYMBOL[TaskStatus.PAUSED] == "⏸"`.
+- `assert _STATUS_ICONS["paused"] == "[magenta]⏸[/magenta]"`.
+- `assert _make_item(FeatureTask(task_id='x', feature_name='f', feature_description='d', status=TaskStatus.PAUSED)) is not None` (does not raise).
+- `assert isinstance(_render_phase_table(FeatureTask(task_id='x', feature_name='f', feature_description='d', status=TaskStatus.PAUSED, phase=TaskPhase.CODE)), str)` (does not raise).
 
 ---
 

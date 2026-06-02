@@ -54,7 +54,7 @@ Deletions only. After this task:
 
 ### Step 1 — Delete `ApproveGate` from `task_detail.py`
 
-Find and delete the entire class:
+`dancode/widgets/task_detail.py` — Find and delete the entire class:
 
 ```python
 class ApproveGate(Message):
@@ -66,7 +66,7 @@ class ApproveGate(Message):
 
 ### Step 2 — Remove `"btn-approve"` case from `on_button_pressed`
 
-In `on_button_pressed`, if there is a case:
+`dancode/widgets/task_detail.py` — In `on_button_pressed`, if there is a case:
 ```python
 elif btn_id == "btn-approve":
     self.post_message(ApproveGate(task_id))
@@ -75,7 +75,7 @@ Delete those two lines. (Check that this case exists; if it was never added, ski
 
 ### Step 3 — Remove `ApproveGate` from the import in `app.py`
 
-Find:
+`dancode/app.py` — Find:
 ```python
 from dancode.widgets.task_detail import (
     ApproveGate,
@@ -93,7 +93,7 @@ Remove `ApproveGate,` from this import block.
 
 ### Step 4 — Delete `on_approve_gate` from `app.py`
 
-Find and delete the entire method:
+`dancode/app.py` — Find and delete the entire method:
 
 ```python
 def on_approve_gate(self, event: ApproveGate) -> None:
@@ -114,7 +114,7 @@ def on_approve_gate(self, event: ApproveGate) -> None:
 
 ### Step 5 — Remove `a — Approve gate` from `action_help`
 
-In `action_help`, if the string `"  a        — Approve gate\n"` is still present
+`dancode/app.py` — In `action_help`, if the string `"  a        — Approve gate\n"` is still present
 (it should have been removed in A3), delete it now. If already absent, skip.
 
 ---

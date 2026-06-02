@@ -46,14 +46,14 @@ No other signatures change.
 
 ## Workflow
 
-1. Open `dancode/config.py`.
-2. Locate the `TaskStatus` class (currently 6 members: PENDING, RUNNING, WAITING,
-   BLOCKED, DONE, CANCELLED).
-3. Add one line after `WAITING = "waiting"`:
+1. `dancode/config.py` — Open the file.
+2. `dancode/config.py` — Locate the `TaskStatus` class (currently 6 members: PENDING,
+   RUNNING, WAITING, BLOCKED, DONE, CANCELLED).
+3. `dancode/config.py` — Add one line after `WAITING = "waiting"`:
    ```python
    PAUSED    = "paused"
    ```
-4. Do not change anything else — no imports, no other classes.
+4. `dancode/config.py` — Do not change anything else — no imports, no other classes.
 
 ---
 

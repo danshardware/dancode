@@ -41,7 +41,7 @@ dancode.workers.event_stream.tail_event_log
 
 ### Step 1 — Confirm no imports
 
-Run:
+`dancode/workers/event_stream.py` — Run:
 ```bash
 grep -r "event_stream" dancode/ tests/
 ```
@@ -51,13 +51,15 @@ If any matches appear, remove those imports first before deleting the file.
 
 ### Step 2 — Delete the file
 
+`dancode/workers/event_stream.py` — Delete:
+
 ```bash
 rm dancode/workers/event_stream.py
 ```
 
 ### Step 3 — Confirm `__init__.py` does not re-export it
 
-Open `dancode/workers/__init__.py` and verify it does not import from `event_stream`.
+`dancode/workers/__init__.py` — Open and verify it does not import from `event_stream`.
 If it does, remove that import.
 
 ---

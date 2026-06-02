@@ -42,7 +42,7 @@ def on_pause_resume_task(self, event: PauseResumeTask) -> None: ...
 
 ### Step 1 — Replace `on_pause_resume_task`
 
-Find the existing `on_pause_resume_task` method (currently ~25 lines; it pops the
+`dancode/app.py` — Find the existing `on_pause_resume_task` method (currently ~25 lines; it pops the
 worker and asyncio task from dicts and cancels them). Replace the entire method body
 with:
 
@@ -56,6 +56,15 @@ def on_pause_resume_task(self, event: PauseResumeTask) -> None:
         worker.resume()
     elif task.status == TaskStatus.RUNNING:
         worker.pause()
+    else:
+        # WAITING (human gate) and BLOCKED tasks are not controlled via [p].
+        # WAITING tasks must be replied to via the inline reply box.
+        # BLOCKED tasks must be restarted via [r].
+        self.notify(
+            "Use the reply box to respond, or [r] to restart a blocked task.",
+            title="Cannot pause/resume",
+            severity="warning",
+        )
     # TaskStatusChanged posted by pause()/resume() flows through
     # on_task_status_changed, which saves config and refreshes the task list.
 ```
@@ -65,7 +74,7 @@ Do not pop the worker or asyncio task from the dicts — the worker stays alive.
 
 ### Step 2 — Remove misleading help text
 
-In `action_help`, find the line:
+`dancode/app.py` — In `action_help`, find the line:
 ```python
 "  a        — Approve gate\n"
 ```
@@ -75,13 +84,16 @@ Delete that line from the help string. (The Approve gate is being fully removed 
 
 ## Acceptance Criteria
 
-- `on_pause_resume_task` body is ≤ 8 lines (not including the def line and docstring).
+- `assert len([l for l in inspect.getsource(DancodeApp.on_pause_resume_task).splitlines() if l.strip()]) <= 15` (excluding def line, docstring, and blank lines).
 - When `task.status == TaskStatus.PAUSED`, only `worker.resume()` is called — no
   `worker.cancel()`, no `asyncio_task.cancel()`, no new worker created.
 - When `task.status == TaskStatus.RUNNING`, only `worker.pause()` is called.
-- `self._agent_workers` and `self._agent_tasks` dicts are NOT modified by
-  `on_pause_resume_task`.
-- `action_help` no longer contains the text `"Approve gate"`.
+- When `task.status` is neither `PAUSED` nor `RUNNING` (e.g. WAITING or BLOCKED),
+  `self.notify(...)` is called with `severity="warning"` — no worker method is called:
+  `assert 'severity="warning"' in inspect.getsource(DancodeApp.on_pause_resume_task)`.
+- `assert 'self._agent_workers.pop' not in inspect.getsource(DancodeApp.on_pause_resume_task)`.
+- `assert 'self._agent_tasks.pop' not in inspect.getsource(DancodeApp.on_pause_resume_task)`.
+- `assert '"Approve gate"' not in inspect.getsource(DancodeApp.action_help)`.
 - All existing tests pass.
 
 ---

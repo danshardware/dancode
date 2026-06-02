@@ -60,6 +60,11 @@ class AgentWorker:
         - Schedules _force_stop() via call_later(30, ...) and stores the handle.
         Must be called from the event loop thread (Textual message handler).
         """
+        # Usage example (from on_pause_resume_task in app.py):
+        # worker = self._agent_workers.get(task.task_id)  # AgentWorker instance
+        # if task.status == TaskStatus.RUNNING:
+        #     worker.pause()    # posts PAUSED, starts 30s timer
+        #     # worker stays alive; blocks before next phase
 
     def resume(self) -> None:
         """
@@ -69,6 +74,10 @@ class AgentWorker:
         - Posts TaskStatusChanged(task_id, current_phase, "running").
         Must be called from the event loop thread.
         """
+        # Usage example (from on_pause_resume_task in app.py):
+        # worker = self._agent_workers.get(task.task_id)
+        # if task.status == TaskStatus.PAUSED:
+        #     worker.resume()   # cancels timer, posts RUNNING, unblocks coroutine
 
     def _force_stop(self) -> None:
         """Called by call_later after 30s — cancels the own asyncio Task."""
@@ -91,7 +100,7 @@ Mutations to shared state / messages posted:
 
 ### Step 1 — Add new instance variables to `__init__`
 
-In `AgentWorker.__init__`, after `self._cancelled = False`, add:
+`dancode/workers/agent_runner.py` — In `AgentWorker.__init__`, after `self._cancelled = False`, add:
 
 ```python
 self._pause_event: asyncio.Event = asyncio.Event()
@@ -102,7 +111,7 @@ self._pause_timer_handle: asyncio.TimerHandle | None = None
 
 ### Step 2 — Update `cancel()`
 
-Replace the existing `cancel()` body:
+`dancode/workers/agent_runner.py` — Replace the existing `cancel()` body:
 
 ```python
 def cancel(self) -> None:
@@ -110,18 +119,28 @@ def cancel(self) -> None:
     self._pause_event.set()   # unblock a paused worker so it can exit
 ```
 
-### Step 3 — Add `pause()`
+### Step 3 — Add module-level constant and `pause()`
+
+`dancode/workers/agent_runner.py` — After the imports block, add the module-level constant:
+
+```python
+_PAUSE_FORCE_STOP_TIMEOUT: int = 30  # seconds before a mid-phase pause is force-cancelled
+```
+
+Then add the method:
 
 ```python
 def pause(self) -> None:
     """Request a pause between phases (or force-stop after 30s)."""
     self._pause_event.clear()
     loop = asyncio.get_event_loop()
-    self._pause_timer_handle = loop.call_later(30, self._force_stop)
+    self._pause_timer_handle = loop.call_later(_PAUSE_FORCE_STOP_TIMEOUT, self._force_stop)
     self._post(TaskStatusChanged(self._task.task_id, self._task.phase, "paused"))
 ```
 
 ### Step 4 — Add `resume()`
+
+`dancode/workers/agent_runner.py` — Add method after `pause()`:
 
 ```python
 def resume(self) -> None:
@@ -135,6 +154,8 @@ def resume(self) -> None:
 
 ### Step 5 — Add `_force_stop()`
 
+`dancode/workers/agent_runner.py` — Add method after `resume()`:
+
 ```python
 def _force_stop(self) -> None:
     """Force-cancel the worker coroutine after the 30s pause timeout fires."""
@@ -145,7 +166,7 @@ def _force_stop(self) -> None:
 
 ### Step 6 — Store `_own_task` at the start of `run()`
 
-At the very first line inside `async def run(self)`, before any other code:
+`dancode/workers/agent_runner.py` — At the very first line inside `async def run(self)`, before any other code:
 
 ```python
 self._own_task = asyncio.current_task()
@@ -153,7 +174,7 @@ self._own_task = asyncio.current_task()
 
 ### Step 7 — Wrap the executor call in a retry loop
 
-Find the existing `try` block that contains `run_in_executor`. Replace it with a
+`dancode/workers/agent_runner.py` — Find the existing `try` block that contains `run_in_executor`. Replace it with a
 `while True:` retry loop. The structure must be:
 
 ```python
@@ -231,19 +252,25 @@ LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 ### Step 8 — Add between-phase pause check
 
-After the `while True:` retry loop (i.e., after the phase result has been processed and
-before `continue` advances to the next phase), add this block. Insert it after all the
-result-processing code (guardrail check, suspension check) and before the `for` loop
-naturally advances to the next phase:
+`dancode/workers/agent_runner.py` — Inside the `for phase in phases:` loop, AFTER all result-processing (the guardrail
+rejection check and the suspension/WAITING check that `return`s early) and AFTER the
+`while True:` retry loop's `break`, but BEFORE the `for` loop advances to the next
+phase, add this block.
+
+The exact anchor is the line `self._post(LogLine(task.task_id, f"Phase {phase} complete."))` — insert AFTER that line:
 
 ```python
-# Between-phase pause: block here if the user requested a pause
-if not self._pause_event.is_set():
-    await self._pause_event.wait()
-    if self._cancelled:
-        break
+            self._post(LogLine(task.task_id, f"Phase {phase} complete."))
+
+            # Between-phase pause: block here if the user requested a pause
+            if not self._pause_event.is_set():
+                await self._pause_event.wait()
+                if self._cancelled:
+                    break
 ```
 
+Do NOT place this check inside the `while True:` loop — it must sit outside the retry
+loop so it only runs after a phase completes fully (not after a force-stop retry).
 This is sufficient because `pause()` already posted PAUSED and `resume()` will post
 RUNNING when `_pause_event` is set again.
 
@@ -251,16 +278,17 @@ RUNNING when `_pause_event` is set again.
 
 ## Acceptance Criteria
 
-- `AgentWorker` has methods `pause()`, `resume()`, and `_force_stop()`.
-- `AgentWorker.__init__` sets `_pause_event` (set), `_own_task = None`,
-  `_pause_timer_handle = None`.
-- `cancel()` calls `self._pause_event.set()` in addition to setting `_cancelled`.
-- Calling `pause()` followed immediately by `resume()` on a worker that has not yet
-  started does not raise.
-- The `run()` coroutine stores `asyncio.current_task()` in `self._own_task` as its
-  first statement.
-- The executor call is inside a `while True:` loop; a caught `CancelledError` clears
-  resume params, posts paused+running, and retries via `continue`.
+- `assert hasattr(AgentWorker, 'pause') and hasattr(AgentWorker, 'resume') and hasattr(AgentWorker, '_force_stop')`
+- `assert worker._pause_event.is_set()` immediately after `AgentWorker.__init__` (event starts set).
+- `assert worker._own_task is None` after `__init__`.
+- `assert worker._pause_timer_handle is None` after `__init__`.
+- After `worker.cancel()` when paused: `assert worker._pause_event.is_set() and worker._cancelled is True`.
+- Calling `pause()` followed immediately by `resume()` on a worker that has not yet started does not raise.
+- `assert asyncio.current_task() is worker._own_task` holds during `run()` execution.
+- The executor call is inside a `while True:` loop; a caught `CancelledError` clears resume params, posts paused+running, and retries via `continue`.
+- `assert '_PAUSE_FORCE_STOP_TIMEOUT' in inspect.getsource(agent_runner_module)` and `assert _PAUSE_FORCE_STOP_TIMEOUT == 30`.
+- `assert 'call_later(_PAUSE_FORCE_STOP_TIMEOUT' in inspect.getsource(AgentWorker.pause)`.
+- The between-phase pause check (`await self._pause_event.wait()`) is present OUTSIDE the `while True:` loop but INSIDE the `for phase in phases:` loop.
 - All existing `tests/unit/test_agent_worker_messages.py` tests pass.
 
 ---

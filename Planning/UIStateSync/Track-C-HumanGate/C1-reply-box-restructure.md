@@ -68,7 +68,7 @@ No mutations to `shared` state. No messages posted.
 
 ### Step 1 — Update `DEFAULT_CSS`
 
-Find and replace the relevant CSS rules. The current CSS for `#reply-box` and the
+`dancode/widgets/task_detail.py` — Find and replace the relevant CSS rules. The current CSS for `#reply-box` and the
 Label inside it is:
 
 ```css
@@ -117,7 +117,7 @@ Notes:
 
 ### Step 2 — Update `compose()`
 
-Inside `compose()`, find the `with Container(id="reply-box"):` block:
+`dancode/widgets/task_detail.py` — Inside `compose()`, find the `with Container(id="reply-box"):` block:
 
 ```python
 with Container(id="reply-box"):
@@ -140,7 +140,7 @@ with Container(id="reply-box"):
 
 ### Step 3 — Rewrite `_refresh_reply_box()`
 
-Replace the entire `_refresh_reply_box` method with:
+`dancode/widgets/task_detail.py` — Replace the entire `_refresh_reply_box` method with:
 
 ```python
 def _refresh_reply_box(self) -> None:

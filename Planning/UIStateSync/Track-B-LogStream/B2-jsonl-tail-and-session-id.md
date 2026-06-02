@@ -37,6 +37,14 @@ Key assumptions:
   side effects.
 - On a force-stop resume (CancelledError caught in A2), a fresh session_id is generated
   so the retry run has its own JSONL file and tail coroutine.
+- **session_id vs _resume_session_id**: `session_id` (local, pre-generated in Step 3)
+  controls the JSONL log path and is injected via `shared_overrides["_forced_session_id"]`
+  into `engine/runner.py`. `_resume_session_id` (existing variable, loaded from the
+  checkpoint) is passed as the `session_id=` keyword argument to `r.run()`. Because
+  `runner.py` pops `_forced_session_id` FIRST (Step 7) and that value takes precedence,
+  both variables resolve to the **same value** during checkpoint resume: Step 3 reads
+  `task.session_ids.get(agent_id)` which was stored when the phase originally started,
+  so `session_id == _resume_session_id`. The log file remains continuous.
 
 ---
 
@@ -70,6 +78,13 @@ class AgentWorker:
           log_path: absolute Path to the JSONL file being tailed.
           task_id:  task_id string for the LogLine messages.
         """
+        # Usage example (inside run(), after log_path is computed):
+        # log_path = LOGS_DIR / agent_id / f"{session_id}.jsonl"
+        # tail_task = asyncio.create_task(
+        #     self._tail_engine_log(log_path, task.task_id)
+        # )
+        # result = await loop.run_in_executor(...)
+        # tail_task.cancel()  # done in finally block
 
     @staticmethod
     def _jsonl_event_to_log_line(event: str, record: dict) -> str | None:
@@ -77,6 +92,11 @@ class AgentWorker:
         Convert a parsed JSONL record into a Rich-markup log line.
         Returns None if the event should not be surfaced.
         """
+        # Usage example:
+        # line = AgentWorker._jsonl_event_to_log_line("tool_call", {"name": "read_file", "args": {}})
+        # # line == "[cyan][Tool] read_file({})[/cyan]"
+        # line = AgentWorker._jsonl_event_to_log_line("unrecognised", {})
+        # # line is None  → caller does not post a LogLine
 ```
 
 JSONL event → log line mapping:
@@ -105,7 +125,7 @@ session_id = _forced_sid or session_id or uuid.uuid4().hex[:12]
 
 ### Step 1 — Add imports to `agent_runner.py`
 
-At the top of `dancode/workers/agent_runner.py`, add:
+`dancode/workers/agent_runner.py` — At the top of the file, add:
 ```python
 import json
 import uuid
@@ -114,7 +134,7 @@ import uuid
 
 ### Step 2 — Replace the `log_path` block in `AgentWorker.run()`
 
-Inside the `for phase in phases:` loop, find and replace:
+`dancode/workers/agent_runner.py` — Inside the `for phase in phases:` loop, find and replace:
 
 ```python
 log_path = LOGS_DIR / f"{self._slug}.jsonl"
@@ -132,7 +152,7 @@ itself via `Logger.__init__`.
 
 ### Step 3 — Pre-generate session_id and store it
 
-Immediately after the `LOGS_DIR.mkdir` line (still inside the `for phase in phases:`
+`dancode/workers/agent_runner.py` — Immediately after the `LOGS_DIR.mkdir` line (still inside the `for phase in phases:`
 loop, before the checkpoint-resume block), add:
 
 ```python
@@ -141,27 +161,36 @@ task.session_ids[agent_id] = session_id   # persist before phase starts
 shared_overrides["_forced_session_id"] = session_id
 ```
 
-Note: if the task already has a `session_ids` entry for this agent (e.g., it was
-resumed from a human gate), we reuse the same session_id so the log file is continuous.
-A force-stop retry (CancelledError branch in A2) generates a new session_id; that code
-should overwrite `shared_overrides["_forced_session_id"]` and `task.session_ids[agent_id]`
-with the new id before `continue`.
+Note: `session_id` is a NEW local variable introduced here. It is distinct from
+`_resume_session_id` (loaded from the checkpoint). During checkpoint resume,
+`task.session_ids.get(agent_id)` already contains the original session_id for this
+phase, so `session_id` will equal `_resume_session_id` and the log file remains
+continuous (see Key Assumptions above).
 
 ### Step 4 — Add tail coroutine launch/cancel inside the retry loop
 
-Inside the `while True:` retry loop (introduced in A2), update the `try` block to
-create and cancel the tail task. The structure is:
+`dancode/workers/agent_runner.py` — Inside the `while True:` retry loop (introduced in A2), update **only the `try` block
+and its `finally` clause** to create and cancel the tail task. Do NOT replace the entire
+`while True` loop or the `for phase in phases:` loop — A2 introduced a between-phase
+pause check AFTER the `break` (Step 8 in A2) that must remain untouched.
+
+The changes within the `while True` block are:
+1. Add `tail_task: asyncio.Task | None = None` as the first line of the loop body.
+2. Inside the `try`: add `log_path` computation and `tail_task = asyncio.create_task(...)` BEFORE `run_in_executor`.
+3. Add a `finally:` clause that cancels `tail_task` if still running.
+
+The resulting `while True:` block must look like this (the `except` clauses and `break` are unchanged from A2 — only add/change the marked lines):
 
 ```python
 while True:
-    tail_task: asyncio.Task | None = None
+    tail_task: asyncio.Task | None = None   # NEW
     try:
         loop = asyncio.get_running_loop()
         runner = AgentRunner(agent_id=agent_id, logs_dir=str(LOGS_DIR))
-        log_path = LOGS_DIR / agent_id / f"{session_id}.jsonl"
-        tail_task = asyncio.create_task(
-            self._tail_engine_log(log_path, task.task_id)
-        )
+        log_path = LOGS_DIR / agent_id / f"{session_id}.jsonl"   # NEW
+        tail_task = asyncio.create_task(                          # NEW
+            self._tail_engine_log(log_path, task.task_id)         # NEW
+        )                                                          # NEW
         result = await loop.run_in_executor(
             None,
             lambda r=runner, s=shared_overrides,
@@ -225,7 +254,7 @@ while True:
 
 ### Step 5 — Add `_tail_engine_log` method
 
-Add after the `run()` method:
+`dancode/workers/agent_runner.py` — Add after the `run()` method:
 
 ```python
 async def _tail_engine_log(self, log_path: Path, task_id: str) -> None:
@@ -258,7 +287,7 @@ async def _tail_engine_log(self, log_path: Path, task_id: str) -> None:
 
 ### Step 6 — Add `_jsonl_event_to_log_line` helper
 
-Add as a static method on `AgentWorker`:
+`dancode/workers/agent_runner.py` — Add as a static method on `AgentWorker`, after `_tail_engine_log`:
 
 ```python
 @staticmethod
@@ -286,7 +315,7 @@ def _jsonl_event_to_log_line(event: str, record: dict) -> str | None:
 
 ### Step 7 — Update `engine/runner.py`
 
-In `AgentRunner.run()`, find:
+`engine/runner.py` — In `AgentRunner.run()`, find:
 
 ```python
 session_id = session_id or uuid.uuid4().hex[:12]
@@ -344,35 +373,17 @@ def test_jsonl_event_to_log_line_session_start():
     assert line == "[dim]Phase started[/dim]"
 
 
-def test_forced_session_id_consumed_by_runner(tmp_path, monkeypatch):
-    """_forced_session_id in shared_overrides must be used as session_id."""
-    import os
-    # Must set COUNCIL_DATA_DIR before importing engine
-    monkeypatch.setenv("COUNCIL_DATA_DIR", str(tmp_path))
-    import importlib
-    import engine.paths
-    importlib.reload(engine.paths)
-
+def test_forced_session_id_in_runner_source():
+    """engine/runner.py must pop _forced_session_id from shared_overrides."""
+    import inspect
     from engine.runner import AgentRunner
-    # Use a minimal agent that exists in the repo
-    runner = AgentRunner(agent_id="phase1_plan", logs_dir=str(tmp_path))
-    overrides = {"_forced_session_id": "testid999"}
-    # We only check that the pop happened — don't actually run the agent
-    runner_run = runner.run  # keep reference
-    # Patch run to just pop and return
-    called_with_sid = {}
-    def fake_run(prompt, flow_name="main", session_id=None, **kwargs):
-        so = kwargs.get("shared_overrides") or {}
-        called_with_sid["forced"] = so.pop("_forced_session_id", None)
-        called_with_sid["session_id"] = session_id
-        return {}
-    monkeypatch.setattr(runner, "run", fake_run)
-    runner.run(prompt="x", shared_overrides=overrides)
-    # _forced_session_id was popped inside run — simulate the real pop
-    # by checking it was present before the call
-    assert "_forced_session_id" not in overrides  # popped
+    src = inspect.getsource(AgentRunner.run)
+    assert "_forced_session_id" in src, (
+        "engine/runner.py AgentRunner.run must pop '_forced_session_id' from "
+        "shared_overrides (B2 Step 7)"
+    )
+    assert ".pop(" in src, (
+        "engine/runner.py must call .pop() to remove _forced_session_id "
+        "from shared_overrides so it is not forwarded to templates"
+    )
 ```
-
-> **Note:** The `test_forced_session_id_consumed_by_runner` test monkey-patches
-> `runner.run` — it is a structural check that the pop happens, not a full integration
-> test. A full integration test would require real AWS credentials; that is out of scope.

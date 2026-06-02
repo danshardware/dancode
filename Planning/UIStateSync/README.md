@@ -62,7 +62,7 @@ Each task in a track may start as soon as the previous task's acceptance criteri
 | `dancode/workers/agent_runner.py` | A2, B2 |
 | `dancode/app.py` | A3, C2, B1 |
 | `dancode/widgets/task_list.py` | A4 |
-| `dancode/widgets/task_detail.py` | A4, C1, C2 |
+| `dancode/widgets/task_detail.py` | A4, C1, C2, B1 |
 | `engine/runner.py` | B2 |
 | `dancode/workers/event_stream.py` | B3 (deleted) |
 

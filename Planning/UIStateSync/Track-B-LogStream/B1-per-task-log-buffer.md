@@ -56,7 +56,7 @@ def clear_log(self) -> None:
 
 ### Step 1 — Add `_log_buffers` to `DancodeApp.__init__`
 
-In `DancodeApp.__init__`, after the line that initialises `self._agent_tasks`, add:
+`dancode/app.py` — In `DancodeApp.__init__`, after the line that initialises `self._agent_tasks`, add:
 
 ```python
 self._log_buffers: dict[str, list[str]] = {}
@@ -64,7 +64,7 @@ self._log_buffers: dict[str, list[str]] = {}
 
 ### Step 2 — Update `on_log_line` in `app.py`
 
-Replace the existing `on_log_line` method:
+`dancode/app.py` — Replace the existing `on_log_line` method:
 
 ```python
 def on_log_line(self, event: LogLine) -> None:
@@ -95,7 +95,7 @@ def on_log_line(self, event: LogLine) -> None:
 
 ### Step 3 — Replay buffer in `on_task_selected` in `app.py`
 
-Replace the existing `on_task_selected` method:
+`dancode/app.py` — Replace the existing `on_task_selected` method:
 
 ```python
 def on_task_selected(self, event: TaskSelected) -> None:
@@ -132,7 +132,7 @@ def on_task_selected(self, event: TaskSelected) -> None:
 
 ### Step 4 — Add `clear_log()` to `TaskDetailWidget`
 
-In `dancode/widgets/task_detail.py`, add the following method after `append_log`:
+`dancode/widgets/task_detail.py` — Add the following method after `append_log`:
 
 ```python
 def clear_log(self) -> None:
