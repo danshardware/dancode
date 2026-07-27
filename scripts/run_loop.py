@@ -51,8 +51,14 @@ def _base_overrides(repo: str, feature: str, openhands_model: str) -> dict:
         "repo_path": repo,
         "feature_name": feature,
         "openhands_model": openhands_model,
-        "_extra_allowed_paths": [repo, str(Path(repo).parent / f"{feature}-worktrees")],
+        "_extra_allowed_paths": [repo, str(_feature_worktree_path(repo, feature))],
     }
+
+
+def _feature_worktree_path(repo: str, feature: str) -> Path:
+    """Return single feature worktree path: parent/<repo>-worktrees/<feature>."""
+    repo_name = Path(repo).name
+    return Path(repo).parent / f"{repo_name}-worktrees" / feature
 
 
 def _parse_schedule_by_track(repo: str, feature: str) -> dict[str, list[dict]]:
@@ -96,14 +102,14 @@ def _parse_schedule_by_track(repo: str, feature: str) -> dict[str, list[dict]]:
     return tracks
 
 
-def _ensure_track_worktree(repo: str, feature: str, track_name: str) -> str:
-    """Return the worktree path for a track branch, creating it if needed.
+def _ensure_feature_worktree(repo: str, feature: str) -> str:
+    """Return single feature worktree path, creating it if needed.
 
-    Branch: <feature>-<track_name>  e.g. usability-improvements-track-a
-    Dest:   <repo>/../<feature>-worktrees/<track_name>/
+    Branch: <feature>
+    Dest:   <repo>/../<repo-name>-worktrees/<feature>/
     """
-    branch = f"{feature}-{track_name}"
-    dest = Path(repo).parent / f"{feature}-worktrees" / track_name
+    branch = feature
+    dest = _feature_worktree_path(repo, feature)
 
     def _find_in_worktree_list(cwd: str) -> str:
         """Return worktree path if dest or branch is already registered."""
@@ -132,7 +138,6 @@ def _ensure_track_worktree(repo: str, feature: str, track_name: str) -> str:
     if existing:
         return existing
 
-    dest = Path(repo).parent / f"{feature}-worktrees" / track_name
     dest.parent.mkdir(parents=True, exist_ok=True)
 
     # If the directory already exists but wasn't found in `git worktree list`
@@ -284,7 +289,7 @@ def run_phase4(repo: str, feature: str, openhands_model: str) -> bool:
 def run_phase5(repo: str, feature: str, openhands_model: str,
                max_qa_retries: int = 3) -> tuple[bool, list[str]]:
     """
-    Per-track, per-task: create one worktree per track, then for each task:
+        Create one worktree for the feature, then for each task:
       1. Check dispatch file exists.
       2. Run code (OpenHands) → commit.
       3. Run QA (OpenHands) → commit.
@@ -302,21 +307,21 @@ def run_phase5(repo: str, feature: str, openhands_model: str,
     blocked_tasks: list[str] = []
     plan_dir = Path(repo) / "Planning" / feature
 
-    for track_name, tasks in tracks.items():
-        print(f"\n  [phase 5] Track: {track_name} ({len(tasks)} task(s))")
-
-        # One worktree for the whole track
-        try:
-            worktree = _ensure_track_worktree(repo, feature, track_name)
-        except RuntimeError as e:
-            print(f"  [phase 5] ✗ {track_name}: worktree creation failed: {e}")
+    try:
+        worktree = _ensure_feature_worktree(repo, feature)
+    except RuntimeError as e:
+        print(f"  [phase 5] ✗ feature worktree creation failed: {e}")
+        for tasks in tracks.values():
             for t in tasks:
                 blocked_tasks.append(t["task_id"])
                 _write_task_status(plan_dir, t["task_id"],
-                                   "BLOCKED: track worktree failed")
-            continue
+                                   "BLOCKED: feature worktree failed")
+        return False, blocked_tasks
 
-        print(f"  [phase 5]   worktree: {worktree}")
+    print(f"\n  [phase 5] Feature worktree: {worktree}")
+
+    for track_name, tasks in tracks.items():
+        print(f"\n  [phase 5] Track: {track_name} ({len(tasks)} task(s))")
 
         for task in tasks:
             task_id = task["task_id"]
@@ -360,32 +365,6 @@ def run_phase5(repo: str, feature: str, openhands_model: str,
             # ── Code (once, or re-run on explicit FAIL) ─────────────────
             raw_dispatch = Path(dispatch_file).read_text()
 
-            # Strip the branch-creation step ("1. Create a git branch named ...
-            # If the branch already exists, check it out.") from the dispatch
-            # file — we are already on the correct worktree branch.
-            cleaned_dispatch = re.sub(
-                r"\n?1\.\s+Create a git branch named[^\n]+\n"
-                r"(?:\s+If the branch[^\n]+\n)?",
-                "",
-                raw_dispatch,
-            )
-
-            safe_dispatch = (
-                "CONTEXT: You are running inside a dedicated git worktree for "
-                "a single coding task. The worktree is already on the correct "
-                "branch for this task.\n"
-                "\n"
-                "HARD CONSTRAINTS — you MUST follow these at all times:\n"
-                "• Do NOT run git branch, git checkout, git switch, git worktree, "
-                "or any command that creates or changes branches.\n"
-                "• Commit changes directly to the current branch (no branch switching).\n"
-                "• Do NOT concern yourself with changes from other tasks — focus "
-                "only on the single task described below.\n"
-                "• Do NOT add, remove, or modify files outside the scope of this task.\n"
-                "\n"
-                + cleaned_dispatch
-            )
-
             def _build_qa_prompt(qa_attempt: int, baseline_sha: str) -> str:
                 task_diff_cmd = (
                     f"git diff {baseline_sha}..HEAD "
@@ -427,7 +406,8 @@ def run_phase5(repo: str, feature: str, openhands_model: str,
                 baseline_sha = baseline_result.stdout.strip() or "HEAD~99"
 
                 print(f"  [phase 5] [{task_id}] coding{code_label}…")
-                _run_openhands(worktree, openhands_model, dispatch_content=safe_dispatch)
+                _run_openhands(worktree, openhands_model,
+                               dispatch_content=raw_dispatch)
                 committed = _git_commit(worktree, f"task {task_id}: code attempt {code_attempt + 1}")
                 if committed:
                     print(f"  [phase 5] [{task_id}] committed code changes")
@@ -590,7 +570,7 @@ def main() -> None:
             print(f"    ✗ {task_id}  — {review.relative_to(repo)}")
         print()
         print("  Manual fix required. Read the review files above, fix the code")
-        print(f"  in the track worktree, then re-run with --start-phase 6.")
+        print(f"  in the feature worktree, then re-run with --start-phase 6.")
         sys.exit(1)
 
     print()
@@ -611,7 +591,7 @@ def _print_blocked_instructions(repo: str, feature: str, blocked: list[str]) -> 
             print(f"    Dispatch: {dispatch_files[0].relative_to(repo)}")
     print()
     print("  Options: edit the dispatch prompt, fix the plan, or implement manually.")
-    print(f"  Worktrees are at: {Path(repo).parent / (feature + '-worktrees')}/")
+    print(f"  Worktree is at: {_feature_worktree_path(repo, feature)}")
     print(f"  Re-run: uv run python3 scripts/run_loop.py --repo {repo} --feature {feature} --start-phase 5")
 
 
